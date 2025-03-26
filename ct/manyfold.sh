@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-source <(curl -s https://raw.githubusercontent.com/bvdberg01/ProxmoxVE/manyfold/misc/build.func)
+source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/build.func)
 # Copyright (c) 2021-2025 community-scripts ORG
 # Author: bvdberg01
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
@@ -7,8 +7,8 @@ source <(curl -s https://raw.githubusercontent.com/bvdberg01/ProxmoxVE/manyfold/
 
 APP="Manyfold"
 var_tags="network"
-var_cpu="2"
-var_ram="1024"
+var_cpu="4"
+var_ram="4096"
 var_disk="15"
 var_os="debian"
 var_version="12"
