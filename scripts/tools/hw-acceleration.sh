@@ -1,116 +1,155 @@
 #!/usr/bin/env bash
 
-# Copyright (c) 2021-2025 tteck
-# Author: tteck (tteckster)
-# License: MIT
-# https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
-# Execute within the Proxmox shell
-# bash -c "$(wget -qLO - https://github.com/community-scripts/ProxmoxVED/raw/main/misc/hw-acceleration.sh)"
+# Title: Proxmox LXC Hardware Passthrough & GPU Acceleration Setup
+# Maintainer: https://github.com/community-scripts/ProxmoxVED
+# Includes: gpu-intel.func, gpu-nvidia.func, gpu-amd.func
 
-set -e
-function header_info {
-  clear
-  cat <<"EOF"
+set -euo pipefail
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf $TEMP_DIR' EXIT
+
+source <(wget -qO- https://github.com/community-scripts/ProxmoxVED/raw/main/scripts/tools/gpu-intel.func)
+source <(wget -qO- https://github.com/community-scripts/ProxmoxVED/raw/main/scripts/tools/gpu-nvidia.func)
+source <(wget -qO- https://github.com/community-scripts/ProxmoxVED/raw/main/scripts/tools/gpu-amd.func)
+
+function header_info() {
+    clear
+    cat <<"EOF"
 
    __ ___      __  ___              __             __  _
   / // / | /| / / / _ |___________ / /__ _______ _/ /_(_)__  ___
  / _  /| |/ |/ / / __ / __/ __/ -_) / -_) __/ _ `/ __/ / _ \/ _ \
 /_//_/ |__/|__/ /_/ |_\__/\__/\__/_/\__/_/  \_,_/\__/_/\___/_//_/
 
+   LXC Hardware Integration Tool for Proxmox VE
 EOF
 }
 
-YW=$(echo "\033[33m")
-BL=$(echo "\033[36m")
-RD=$(echo "\033[01;31m")
-GN=$(echo "\033[1;92m")
-CL=$(echo "\033[m")
-BFR="\\r\\033[K"
-HOLD="-"
-CM="${GN}✓${CL}"
-set -e
-header_info
-echo "Loading..."
-function msg_info() {
-  local msg="$1"
-  echo -ne " ${HOLD} ${YW}${msg}..."
+function msg() {
+    local type="$1"
+    shift
+    case "$type" in
+    info) printf " \033[36m➤\033[0m %s\n" "$@" ;;
+    ok) printf " \033[32m✔\033[0m %s\n" "$@" ;;
+    warn) printf " \033[33m⚠\033[0m %s\n" "$@" >&2 ;;
+    err) printf " \033[31m✘\033[0m %s\n" "$@" >&2 ;;
+    esac
 }
 
-function msg_ok() {
-  local msg="$1"
-  echo -e "${BFR} ${CM} ${GN}${msg}${CL}"
+function prompt_features() {
+    local features=()
+    printf "\nAvailable passthrough options:\n"
+    [[ -e /dev/ttyUSB0 || -e /dev/ttyACM0 ]] && echo " [1] USB" && features+=("usb")
+    [[ -e /dev/dri/renderD128 ]] && echo " [2] Intel VAAPI" && features+=("intel")
+    [[ -e /dev/nvidia0 ]] && echo " [3] NVIDIA GPU" && features+=("nvidia")
+    [[ -e /dev/kfd ]] && echo " [4] AMD GPU" && features+=("amd")
+    [[ ${#features[@]} -eq 0 ]] && msg err "No supported hardware detected." && exit 1
+    echo
+    read -rp "Select hardware (e.g. 1 3): " choices
+    SELECTED_FEATURES=()
+    for i in $choices; do
+        case "$i" in
+        1) SELECTED_FEATURES+=("usb") ;;
+        2) SELECTED_FEATURES+=("intel") ;;
+        3) SELECTED_FEATURES+=("nvidia") ;;
+        4) SELECTED_FEATURES+=("amd") ;;
+        esac
+    done
+    [[ ${#SELECTED_FEATURES[@]} -eq 0 ]] && msg warn "No valid feature selected." && exit 1
 }
 
-if ! pveversion | grep -Eq "pve-manager/(8\.[1-3])"; then
-  msg_error "This version of Proxmox Virtual Environment is not supported"
-  echo -e "Requires PVE Version 8.1 or higher"
-  echo -e "Exiting..."
-  sleep 2
-  exit
-fi
+function select_lxc_cts() {
+    mapfile -t containers < <(pct list | awk 'NR>1 {print $1 "|" $2}')
+    [[ ${#containers[@]} -eq 0 ]] && msg warn "No LXC containers found." && exit 1
+    echo
+    echo "Available Containers:"
+    for entry in "${containers[@]}"; do
+        ctid="${entry%%|*}"
+        name="${entry##*|}"
+        echo " [$ctid] $name"
+    done
+    echo
+    read -rp "Enter container ID(s) separated by space: " SELECTED_CTIDS
+    [[ -z "$SELECTED_CTIDS" ]] && msg warn "No containers selected." && exit 1
+}
 
-whiptail --backtitle "Proxmox VE Helper Scripts" --title "Add Intel HW Acceleration" --yesno "This Will Add Intel HW Acceleration to an existing LXC Container. Proceed?" 8 72 || exit
-NODE=$(hostname)
-PREV_MENU=()
-MSG_MAX_LENGTH=0
-privileged_containers=$(pct list | awk 'NR>1 && system("grep -q \047unprivileged: 1\047 /etc/pve/lxc/" $1 ".conf")')
+function is_alpine_container() {
+    local ctid="$1"
+    pct exec "$ctid" -- sh -c 'grep -qi alpine /etc/os-release' >/dev/null 2>&1
+}
 
-if [ -z "$privileged_containers" ]; then
-    whiptail --msgbox "No Privileged Containers Found." 10 58
-    exit
-fi
-
-while read -r TAG ITEM; do
-  OFFSET=2
-  ((${#ITEM} + OFFSET > MSG_MAX_LENGTH)) && MSG_MAX_LENGTH=${#ITEM}+OFFSET
-  PREV_MENU+=("$TAG" "$ITEM " "OFF")
-done < <(echo "$privileged_containers")
-
-privileged_container=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "Privileged Containers on $NODE" --checklist "\nSelect a Container To Add Intel HW Acceleration:\n" 16 $((MSG_MAX_LENGTH + 23)) 6 "${PREV_MENU[@]}" 3>&1 1>&2 2>&3 | tr -d '"') || exit
-header_info
-read -r -p "Verbose mode? <y/N> " prompt
-  if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
-  STD=""
-  else
-  STD="silent"
-  fi
-header_info
-
-cat <<EOF >>/etc/pve/lxc/${privileged_container}.conf
-lxc.cgroup2.devices.allow: c 226:0 rwm
-lxc.cgroup2.devices.allow: c 226:128 rwm
-lxc.cgroup2.devices.allow: c 29:0 rwm
-lxc.mount.entry: /dev/fb0 dev/fb0 none bind,optional,create=file
-lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir
-lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file
+function apply_usb_passthrough() {
+    local conf="$1"
+    grep -q "ttyUSB" "$conf" 2>/dev/null && return
+    cat <<EOF >>"$conf"
+# USB Serial Passthrough
+lxc.cgroup2.devices.allow: a
+lxc.cap.drop:
+lxc.cgroup2.devices.allow: c 188:* rwm
+lxc.cgroup2.devices.allow: c 189:* rwm
+lxc.mount.entry: /dev/serial/by-id  dev/serial/by-id  none bind,optional,create=dir
+lxc.mount.entry: /dev/ttyUSB0       dev/ttyUSB0       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyUSB1       dev/ttyUSB1       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyACM0       dev/ttyACM0       none bind,optional,create=file
+lxc.mount.entry: /dev/ttyACM1       dev/ttyACM1       none bind,optional,create=file
 EOF
+}
 
-read -r -p "Do you need the intel-media-va-driver-non-free driver (Debian 12 only)? <y/N> " prompt
-if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
-  header_info
-  msg_info "Installing Hardware Acceleration (non-free)"
-  pct exec ${privileged_container} -- bash -c "cat <<EOF >/etc/apt/sources.list.d/non-free.list
+function main() {
+    header_info
+    prompt_features
+    select_lxc_cts
 
-deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+    local updated_cts=()
 
-deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+    for ctid in $SELECTED_CTIDS; do
+        local conf="/etc/pve/lxc/${ctid}.conf"
+        local updated=0
 
-deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-EOF"
+        for feature in "${SELECTED_FEATURES[@]}"; do
+            case "$feature" in
+            usb)
+                msg info "Adding USB passthrough to CT $ctid..."
+                apply_usb_passthrough "$conf" && updated=1
+                ;;
+            intel)
+                msg info "Intel passthrough setup for CT $ctid"
+                passthrough_intel_to_lxc "$ctid" && install_intel_tools_in_ct "$ctid" && updated=1
+                ;;
+            nvidia)
+                msg info "Validating NVIDIA setup..."
+                nvidia_validate_driver_version
+                nvidia_validate_cuda_version
+                local minor
+                minor=$(nvidia_select_gpu_minor)
+                nvidia_lxc_passthrough "$ctid" "$minor" && updated=1
+                ;;
+            amd)
+                msg info "Applying AMD passthrough to CT $ctid..."
+                passthrough_amd_to_lxc "$ctid" && install_amd_tools_in_ct "$ctid" && updated=1
+                ;;
+            esac
+        done
 
-  pct exec ${privileged_container} -- bash -c "silent() { \"\$@\" >/dev/null 2>&1; } && $STD apt-get update && $STD apt-get install -y intel-media-va-driver-non-free ocl-icd-libopencl1 intel-opencl-icd vainfo intel-gpu-tools && $STD adduser \$(id -u -n) video && $STD adduser \$(id -u -n) render"
-  msg_ok "Installed Hardware Acceleration (non-free)"
-else
-  header_info
-  msg_info "Installing Hardware Acceleration"
-  pct exec ${privileged_container} -- bash -c "silent() { \"\$@\" >/dev/null 2>&1; } && $STD apt-get install -y va-driver-all ocl-icd-libopencl1 intel-opencl-icd vainfo intel-gpu-tools && chgrp video /dev/dri && chmod 755 /dev/dri && $STD adduser \$(id -u -n) video && $STD adduser \$(id -u -n) render"
-  msg_ok "Installed Hardware Acceleration"
-fi
-sleep 1
-whiptail --backtitle "Proxmox VE Helper Scripts" --msgbox --title "Added tools" "vainfo, execute command 'vainfo'\nintel-gpu-tools, execute command 'intel_gpu_top'" 8 58
+        [[ "$updated" -eq 1 ]] && updated_cts+=("$ctid")
+    done
 
-msg_ok "Completed Successfully!\n"
-echo -e "Reboot container ${BL}$privileged_container${CL} to apply the new settings\n"
+    echo
+    if [[ ${#updated_cts[@]} -gt 0 ]]; then
+        msg ok "Updated containers: ${updated_cts[*]}"
+        read -rp "Restart updated container(s)? [y/N]: " confirm
+        if [[ "${confirm,,}" == "y" ]]; then
+            for ctid in "${updated_cts[@]}"; do
+                pct reboot "$ctid"
+                msg ok "Restarted CT $ctid"
+            done
+        else
+            msg info "Restart skipped."
+        fi
+    else
+        msg warn "No passthrough changes applied."
+    fi
+}
+
+main

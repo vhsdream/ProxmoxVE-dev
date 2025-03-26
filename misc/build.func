@@ -29,14 +29,12 @@ color() {
 
     # Formatting
     CL=$(echo "\033[m")
-    UL=$(echo "\033[4m")
     BOLD=$(echo "\033[1m")
-    BFR="\\r\\033[K"
     HOLD=" "
     TAB="  "
 
     # Icons
-    CM="${TAB}✔️${TAB}${CL}"
+    CM="${TAB}✔️${TAB}"
     CROSS="${TAB}✖️${TAB}${CL}"
     INFO="${TAB}💡${TAB}${CL}"
     OS="${TAB}🖥️${TAB}${CL}"
@@ -59,9 +57,7 @@ color() {
     ROOTSSH="${TAB}🔑${TAB}${CL}"
     CREATING="${TAB}🚀${TAB}${CL}"
     ADVANCED="${TAB}🧩${TAB}${CL}"
-    CIFS="${TAB}🔌${TAB}${CL}"
     FUSE="${TAB}🔧${TAB}${CL}"
-    NFS="${TAB}📂${TAB}${CL}"
 }
 
 # This function enables error handling in the script by setting options and defining a trap for the ERR signal.
@@ -72,71 +68,91 @@ catch_errors() {
 
 # This function is called when an error occurs. It receives the exit code, line number, and command that caused the error, and displays an error message.
 error_handler() {
-    source /dev/stdin <<<$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
+    source /dev/stdin <<<$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
     if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID >/dev/null; then kill $SPINNER_PID >/dev/null; fi
     printf "\e[?25h"
     local exit_code="$?"
     local line_number="$1"
     local command="$2"
-    local error_description="$(get_error_description "$exit_code")"
-    local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL} (${YW}$error_description${CL}): while executing command ${YW}$command${CL}"
-    post_update_to_api "failed" "$exit_code" "$error_description"
+    ## 26.03.2025 alpine bug
+    #local error_description="$(get_error_description "$exit_code")"
+    #local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL} (${YW}$error_description${CL}): while executing command ${YW}$command${CL}"
+    #post_update_to_api "failed" "$exit_code" "$error_description"
+    local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}"
+    post_update_to_api "failed" "${command}"
     echo -e "\n$error_message\n"
 }
 
 # This function displays an informational message with logging support.
+declare -A MSG_INFO_SHOWN
+SPINNER_ACTIVE=0
+SPINNER_PID=""
+SPINNER_MSG=""
+
+trap 'stop_spinner' EXIT INT TERM HUP
+
 start_spinner() {
     local msg="$1"
-    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     local spin_i=0
     local interval=0.1
-    local term_width=$(tput cols)
+
+    SPINNER_MSG="$msg"
+    printf "\r\e[2K" >&2
 
     {
-        while [ "${SPINNER_ACTIVE:-1}" -eq 1 ]; do
-            printf "\r\e[2K${frames[spin_i]} ${YW}%b${CL}" "$msg" >&2
+        while [[ "$SPINNER_ACTIVE" -eq 1 ]]; do
+            printf "\r\e[2K%s %b" "${frames[spin_i]}" "${YW}${SPINNER_MSG}${CL}" >&2
             spin_i=$(((spin_i + 1) % ${#frames[@]}))
             sleep "$interval"
         done
     } &
 
     SPINNER_PID=$!
+    disown "$SPINNER_PID"
+}
+
+stop_spinner() {
+    if [[ ${SPINNER_PID+v} && -n "$SPINNER_PID" ]] && kill -0 "$SPINNER_PID" 2>/dev/null; then
+        kill "$SPINNER_PID" 2>/dev/null
+        sleep 0.1
+        kill -0 "$SPINNER_PID" 2>/dev/null && kill -9 "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null || true
+    fi
+    SPINNER_ACTIVE=0
+    unset SPINNER_PID
+}
+
+spinner_guard() {
+    if [[ "$SPINNER_ACTIVE" -eq 1 ]] && [[ -n "$SPINNER_PID" ]]; then
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null || true
+        SPINNER_ACTIVE=0
+        unset SPINNER_PID
+    fi
 }
 
 msg_info() {
     local msg="$1"
-    if [ "${SPINNER_ACTIVE:-0}" -eq 1 ]; then
-        return
-    fi
+    [[ -n "${MSG_INFO_SHOWN["$msg"]+x}" ]] && return
+    MSG_INFO_SHOWN["$msg"]=1
 
+    spinner_guard
     SPINNER_ACTIVE=1
     start_spinner "$msg"
 }
 
 msg_ok() {
-    if [ -n "${SPINNER_PID:-}" ] && ps -p "$SPINNER_PID" >/dev/null 2>&1; then
-        kill "$SPINNER_PID" >/dev/null 2>&1
-        wait "$SPINNER_PID" 2>/dev/null || true
-    fi
-
     local msg="$1"
-    printf "\r\e[2K${CM}${GN}%b${CL}\n" "$msg" >&2
-    unset SPINNER_PID
-    SPINNER_ACTIVE=0
-
-    log_message "OK" "$msg"
+    stop_spinner
+    printf "\r\e[2K%s %b\n" "${CM}" "${GN}${msg}${CL}" >&2
+    unset MSG_INFO_SHOWN["$msg"]
 }
 
 msg_error() {
-    if [ -n "${SPINNER_PID:-}" ] && ps -p "$SPINNER_PID" >/dev/null 2>&1; then
-        kill "$SPINNER_PID" >/dev/null 2>&1
-        wait "$SPINNER_PID" 2>/dev/null || true
-    fi
-
+    stop_spinner
     local msg="$1"
-    printf "\r\e[2K${CROSS}${RD}%b${CL}\n" "$msg" >&2
-    unset SPINNER_PID
-    SPINNER_ACTIVE=0
+    printf "\r\e[2K%s %b\n" "${CROSS}" "${RD}${msg}${CL}" >&2
     log_message "ERROR" "$msg"
 }
 
@@ -285,7 +301,7 @@ get_header() {
 
     # Check if local file already present
     if [ ! -f "$local_header_path" ]; then
-        wget -qO "$local_header_path" "$header_url"
+        curl -fsSL "$header_url" -o "$local_header_path"
         if [ $? -ne 0 ]; then
             echo -e "${WARN}${BOLD}${YLW}Failed to download header for ${app_name}. No header will be displayed.${CL}"
             return 1
@@ -337,8 +353,9 @@ base_settings() {
     HN=$NSAPP
     BRG="vmbr0"
     NET="dhcp"
-    IPv6="dhcp"
-    IPv6GW=""
+    # 26.03.2025 disabled
+    #IPv6="dhcp"
+    #IPv6GW=""
     GATE=""
     APT_CACHER=""
     APT_CACHER_IP=""
@@ -351,9 +368,8 @@ base_settings() {
     SSH="no"
     SSH_AUTHORIZED_KEY=""
     TAGS="community-script-dev;"
-    ENABLE_NFS="no"
-    ENABLE_CIFS="no"
-    ENABLE_FUSE="no"
+    # 26.03.2025 disabled
+    # ENABLE_FUSE="no"
 
     # Override default settings with variables from ct script
     CT_TYPE=${var_unprivileged:-$CT_TYPE}
@@ -362,7 +378,8 @@ base_settings() {
     RAM_SIZE=${var_ram:-$RAM_SIZE}
     VERB=${var_verbose:-$VERBOSE}
     TAGS="${TAGS}${var_tags:-}"
-    ENABLE_FUSE=${var_fuse:-$ENABLE_FUSE}
+    # 26.03.2025 disabled
+    #ENABLE_FUSE=${var_fuse:-$ENABLE_FUSE}
 
     # Since these 2 are only defined outside of default_settings function, we add a temporary fallback. TODO: To align everything, we should add these as constant variables (e.g. OSTYPE and OSVERSION), but that would currently require updating the default_settings function for all existing scripts
     if [ -z "$var_os" ]; then
@@ -911,316 +928,314 @@ EOF
     fi
 
 }
-config_file(){
+config_file() {
 
-  whiptail --backtitle "Proxmox VE Helper Scripts" --msgbox --title "Default distribution for $APP" "${var_os} ${var_version} \n \nIf the default Linux distribution is not adhered to, script support will be discontinued. \n" 10 58
+    whiptail --backtitle "Proxmox VE Helper Scripts" --msgbox --title "Default distribution for $APP" "${var_os} ${var_version} \n \nIf the default Linux distribution is not adhered to, script support will be discontinued. \n" 10 58
 
-  CONFIG_FILE="/opt/community-scripts/.settings"
+    CONFIG_FILE="/opt/community-scripts/.settings"
 
-  if [[ -f "/opt/community-scripts/${NSAPP}.conf" ]]; then
-    CONFIG_FILE="/opt/community-scripts/${NSAPP}.conf"
-  fi
-
-  if CONFIG_FILE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --inputbox "Set absolute path to config file" 8 58 $CONFIG_FILE --title "CONFIG FILE" 3>&1 1>&2 2>&3); then
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-      echo -e "${CROSS}${RD}Config file not found, exiting script!.${CL}"
-      exit
-    else
-      echo -e "${INFO}${BOLD}${DGN}Using config File: ${BGN}$CONFIG_FILE${CL}"
-      base_settings
-      source "$CONFIG_FILE"
+    if [[ -f "/opt/community-scripts/${NSAPP}.conf" ]]; then
+        CONFIG_FILE="/opt/community-scripts/${NSAPP}.conf"
     fi
-  fi
 
-  if [[ "$var_os" == "debian" ]]; then
-    echo -e "${OS}${BOLD}${DGN}Operating System: ${BGN}$var_os${CL}"
-    if [[ "$var_version" == "11" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    elif [[ "$var_version" == "12" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    else
-      msg_error "Unknown setting for var_version, should be 11 or 12, was ${var_version}"
-      exit
-    fi
-  elif [[ "$var_os" == "ubuntu" ]]; then
-    echo -e "${OS}${BOLD}${DGN}Operating System: ${BGN}$var_os${CL}"
-    if [[ "$var_version" == "20.04" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    elif [[ "$var_version" == "22.04" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    elif [[ "$var_version" == "24.04" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    elif [[ "$var_version" == "24.10" ]]; then
-      echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
-    else
-      msg_error "Unknown setting for var_version, should be 20.04, 22.04, 24.04 or 24.10, was ${var_version}"
-      exit
-    fi
-  else
-    msg_error "Unknown setting for var_os! should be debian or ubuntu, was ${var_os}"
-    exit
-  fi
-
-  if [[ -n "$CT_ID" ]]; then
-
-    if [[ "$CT_ID" =~ ^([0-9]{3,4})-([0-9]{3,4})$ ]]; then
-      MIN_ID=${BASH_REMATCH[1]}
-      MAX_ID=${BASH_REMATCH[2]}
-
-       if (( MIN_ID >= MAX_ID )); then
-        msg_error "Invalid Container ID range. The first number must be smaller than the second number, was ${CT_ID}"
-        exit
-       fi
-
-      LIST_OF_IDS=$(pvesh get /cluster/resources --type vm --output-format json | grep -oP '"vmid":\s*\K\d+' )
-
-      for ((ID=MIN_ID; ID<=MAX_ID; ID++)); do
-        if ! grep -q "^$ID$" <<< "$LIST_OF_IDS"; then
-          CT_ID=$ID
-          break
-        fi
-      done
-
-      echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
-
-    elif [[ "$CT_ID" =~ ^[0-9]+$ ]]; then
-
-      LIST_OF_IDS=$(pvesh get /cluster/resources --type vm --output-format json | grep -oP '"vmid":\s*\K\d+' )
-      if ! grep -q "^$CT_ID$" <<< "$LIST_OF_IDS"; then
-        echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
-      else
-        msg_error "Container ID $CT_ID already exists"
-        exit
-      fi
-    else
-      msg_error "Invalid Container ID format. Needs to be 0000-9999 or 0-9999, was ${CT_ID}"
-      exit
-    fi
-  fi
-
-  if [[ "$CT_TYPE" -eq 0 ]]; then
-    CT_TYPE_DESC="Privileged"
-  elif [[ "$CT_TYPE" -eq 1 ]]; then
-    CT_TYPE_DESC="Unprivileged"
-  else
-    msg_error "Unknown setting for CT_TYPE, should be 1 or 0, was ${CT_TYPE}"
-    exit
-  fi
-  echo -e "${CONTAINERTYPE}${BOLD}${DGN}Container Type: ${BGN}$CT_TYPE_DESC${CL}"
-
-  if [[ ! -z "$PW" ]]; then
-
-    if [[ "$PW" == *" "* ]]; then
-      msg_error "Password cannot be empty"
-      exit
-    elif [[ ${#PW} -lt 5 ]]; then
-      msg_error "Password must be at least 5 characters long"
-      exit
-    else
-      echo -e "${VERIFYPW}${BOLD}${DGN}Root Password: ${BGN}********${CL}"
-    fi
-    PW="-password $PW"
-  else
-    PW=""
-    echo -e "${VERIFYPW}${BOLD}${DGN}Root Password: ${BGN}Automatic Login${CL}"
-  fi
-  echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
-
-  if [[ ! -z "$HN" ]]; then
-    echo -e "${HOSTNAME}${BOLD}${DGN}Hostname: ${BGN}$HN${CL}"
-  else
-    msg_error "Hostname cannot be empty"
-    exit
-  fi
-
-  if [[ ! -z "$DISK_SIZE" ]]; then
-    if  [[ "$DISK_SIZE" =~ ^-?[0-9]+$ ]]; then
-      echo -e "${DISKSIZE}${BOLD}${DGN}Disk Size: ${BGN}${DISK_SIZE} GB${CL}"
-    else
-      msg_error "DISK_SIZE must be an integer, was ${DISK_SIZE}"
-      exit
-    fi
-  else
-    msg_error "DISK_SIZE cannot be empty"
-    exit
-  fi
-
-  if [[ ! -z "$CORE_COUNT" ]]; then
-    if  [[ "$CORE_COUNT" =~ ^-?[0-9]+$ ]]; then
-      echo -e "${CPUCORE}${BOLD}${DGN}CPU Cores: ${BGN}${CORE_COUNT}${CL}"
-    else
-      msg_error "CORE_COUNT must be an integer, was ${CORE_COUNT}"
-      exit
-    fi
-  else
-    msg_error "CORE_COUNT cannot be empty"
-    exit
-  fi
-
-  if [[ ! -z "$RAM_SIZE" ]]; then
-    if  [[ "$RAM_SIZE" =~ ^-?[0-9]+$ ]]; then
-      echo -e "${RAMSIZE}${BOLD}${DGN}RAM Size: ${BGN}${RAM_SIZE} MiB${CL}"
-    else
-      msg_error "RAM_SIZE must be an integer, was ${RAM_SIZE}"
-      exit
-    fi
-  else
-    msg_error "RAM_SIZE cannot be empty"
-    exit
-  fi
-
-  if [[ ! -z "$BRG" ]]; then
-    if grep -q "^iface ${BRG}" /etc/network/interfaces; then
-      echo -e "${BRIDGE}${BOLD}${DGN}Bridge: ${BGN}$BRG${CL}"
-    else
-      msg_error "Bridge '${BRG}' does not exist in /etc/network/interfaces"
-      exit
-    fi
-  else
-    msg_error "Bridge cannot be empty"
-    exit
-  fi
-
-
-  local ip_cidr_regex='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$'
-  local ip_regex='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$'
-
-  if [[ ! -z $NET ]]; then
-    if [ "$NET" == "dhcp" ]; then
-      echo -e "${NETWORK}${BOLD}${DGN}IP Address: ${BGN}DHCP${CL}"
-      echo -e "${GATEWAY}${BOLD}${DGN}Gateway IP Address: ${BGN}Default${CL}"
-    elif
-      [[ "$NET" =~ $ip_cidr_regex ]]; then
-      echo -e "${NETWORK}${BOLD}${DGN}IP Address: ${BGN}$NET${CL}"
-    else
-      msg_error "Invalid IP Address format. Needs to be 0.0.0.0/0, was ${NET}"
-      exit
-    fi
-  fi
-  if [ ! -z "$GATE" ]; then
-    if [[ "$GATE" =~ $ip_regex ]]; then
-      echo -e "${GATEWAY}${BOLD}${DGN}Gateway IP Address: ${BGN}$GATE${CL}"
-        GATE=",gw=$GATE"
-    else
-      msg_error "Invalid IP Address format for Gateway. Needs to be 0.0.0.0, was ${GATE}"
-      exit
-    fi
-  else
-    msg_error "Gateway IP Address cannot be empty"
-    exit
-  fi
-
-
-  if [[ ! -z "$APT_CACHER_IP" ]]; then
-    if [[ "$APT_CACHER_IP" =~ $ip_regex ]]; then
-          APT_CACHER="yes"
-          echo -e "${NETWORK}${BOLD}${DGN}APT-CACHER IP Address: ${BGN}$APT_CACHER_IP${CL}"
+    if CONFIG_FILE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --inputbox "Set absolute path to config file" 8 58 $CONFIG_FILE --title "CONFIG FILE" 3>&1 1>&2 2>&3); then
+        if [[ ! -f "$CONFIG_FILE" ]]; then
+            echo -e "${CROSS}${RD}Config file not found, exiting script!.${CL}"
+            exit
         else
-          msg_error "Invalid IP Address format for APT-Cacher. Needs to be 0.0.0.0, was ${APT_CACHER_IP}"
-          exit
+            echo -e "${INFO}${BOLD}${DGN}Using config File: ${BGN}$CONFIG_FILE${CL}"
+            base_settings
+            source "$CONFIG_FILE"
         fi
-  fi
-
-  if [[ "$DISABLEIP6" == "yes" ]]; then
-    echo -e "${DISABLEIPV6}${BOLD}${DGN}Disable IPv6: ${BGN}Yes${CL}"
-  elif [[ "$DISABLEIP6" == "no" ]]; then
-    echo -e "${DISABLEIPV6}${BOLD}${DGN}Disable IPv6: ${BGN}No${CL}"
-  else
-    msg_error "Disable IPv6 needs to be 'yes' or 'no'"
-    exit
-  fi
-
-  if [[ ! -z "$MTU" ]]; then
-    if [[ "$MTU" =~ ^-?[0-9]+$ ]]; then
-      echo -e "${DEFAULT}${BOLD}${DGN}Interface MTU Size: ${BGN}$MTU${CL}"
-      MTU=",mtu=$MTU"
-    else
-      msg_error "MTU must be an integer, was ${MTU}"
-      exit
     fi
-  else
-    MTU=""
-    echo -e "${DEFAULT}${BOLD}${DGN}Interface MTU Size: ${BGN}Default${CL}"
 
-  fi
-
-  if [[ ! -z "$SD" ]]; then
-    echo -e "${SEARCH}${BOLD}${DGN}DNS Search Domain: ${BGN}$SD${CL}"
-    SD="-searchdomain=$SD"
-  else
-    SD=""
-    echo -e "${SEARCH}${BOLD}${DGN}DNS Search Domain: ${BGN}HOST${CL}"
-  fi
-
-
-  if [[ ! -z "$NS" ]]; then
-     if [[ "$NS" =~ $ip_regex ]]; then
-        echo -e "${NETWORK}${BOLD}${DGN}DNS Server IP Address: ${BGN}$NS${CL}"
-        NS="-nameserver=$NS"
-      else
-        msg_error "Invalid IP Address format for DNS Server. Needs to be 0.0.0.0, was ${NS}"
+    if [[ "$var_os" == "debian" ]]; then
+        echo -e "${OS}${BOLD}${DGN}Operating System: ${BGN}$var_os${CL}"
+        if [[ "$var_version" == "11" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        elif [[ "$var_version" == "12" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        else
+            msg_error "Unknown setting for var_version, should be 11 or 12, was ${var_version}"
+            exit
+        fi
+    elif [[ "$var_os" == "ubuntu" ]]; then
+        echo -e "${OS}${BOLD}${DGN}Operating System: ${BGN}$var_os${CL}"
+        if [[ "$var_version" == "20.04" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        elif [[ "$var_version" == "22.04" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        elif [[ "$var_version" == "24.04" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        elif [[ "$var_version" == "24.10" ]]; then
+            echo -e "${OSVERSION}${BOLD}${DGN}Version: ${BGN}$var_version${CL}"
+        else
+            msg_error "Unknown setting for var_version, should be 20.04, 22.04, 24.04 or 24.10, was ${var_version}"
+            exit
+        fi
+    else
+        msg_error "Unknown setting for var_os! should be debian or ubuntu, was ${var_os}"
         exit
-      fi
-  else
-    NS=""
-    echo -e "${NETWORK}${BOLD}${DGN}DNS Server IP Address: ${BGN}HOST${CL}"
-  fi
-
-  if [[ ! -z "$MAC" ]]; then
-    if  [[ "$MAC" =~ ^([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}$ ]]; then
-      echo -e "${MACADDRESS}${BOLD}${DGN}MAC Address: ${BGN}$MAC${CL}"
-      MAC=",hwaddr=$MAC"
-    else
-      msg_error "MAC Address must be in the format xx:xx:xx:xx:xx:xx, was ${MAC}"
-      exit
     fi
-  fi
 
-  if [[ ! -z "$VLAN" ]]; then
-    if [[ "$VLAN" =~ ^-?[0-9]+$ ]]; then
-      echo -e "${VLANTAG}${BOLD}${DGN}Vlan: ${BGN}$VLAN${CL}"
-      VLAN=",tag=$VLAN"
-    else
-      msg_error "VLAN must be an integer, was ${VLAN}"
-      exit
+    if [[ -n "$CT_ID" ]]; then
+
+        if [[ "$CT_ID" =~ ^([0-9]{3,4})-([0-9]{3,4})$ ]]; then
+            MIN_ID=${BASH_REMATCH[1]}
+            MAX_ID=${BASH_REMATCH[2]}
+
+            if ((MIN_ID >= MAX_ID)); then
+                msg_error "Invalid Container ID range. The first number must be smaller than the second number, was ${CT_ID}"
+                exit
+            fi
+
+            LIST_OF_IDS=$(pvesh get /cluster/resources --type vm --output-format json | grep -oP '"vmid":\s*\K\d+')
+
+            for ((ID = MIN_ID; ID <= MAX_ID; ID++)); do
+                if ! grep -q "^$ID$" <<<"$LIST_OF_IDS"; then
+                    CT_ID=$ID
+                    break
+                fi
+            done
+
+            echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
+
+        elif [[ "$CT_ID" =~ ^[0-9]+$ ]]; then
+
+            LIST_OF_IDS=$(pvesh get /cluster/resources --type vm --output-format json | grep -oP '"vmid":\s*\K\d+')
+            if ! grep -q "^$CT_ID$" <<<"$LIST_OF_IDS"; then
+                echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
+            else
+                msg_error "Container ID $CT_ID already exists"
+                exit
+            fi
+        else
+            msg_error "Invalid Container ID format. Needs to be 0000-9999 or 0-9999, was ${CT_ID}"
+            exit
+        fi
     fi
-  fi
 
-  if [[ ! -z "$TAGS" ]]; then
-    echo -e "${NETWORK}${BOLD}${DGN}Tags: ${BGN}$TAGS${CL}"
-  fi
-
-  if [[ "$SSH" == "yes" ]]; then
-    echo -e "${ROOTSSH}${BOLD}${DGN}Root SSH Access: ${BGN}$SSH${CL}"
-    if [[ ! -z "$SSH_AUTHORIZED_KEY" ]]; then
-      echo -e "${ROOTSSH}${BOLD}${DGN}SSH Authorized Key: ${BGN}********************${CL}"
+    if [[ "$CT_TYPE" -eq 0 ]]; then
+        CT_TYPE_DESC="Privileged"
+    elif [[ "$CT_TYPE" -eq 1 ]]; then
+        CT_TYPE_DESC="Unprivileged"
     else
-      echo -e "${ROOTSSH}${BOLD}${DGN}SSH Authorized Key: ${BGN}None${CL}"
+        msg_error "Unknown setting for CT_TYPE, should be 1 or 0, was ${CT_TYPE}"
+        exit
     fi
-  elif [[ "$SSH" == "no" ]]; then
-    echo -e "${ROOTSSH}${BOLD}${DGN}Root SSH Access: ${BGN}$SSH${CL}"
-  else
-    msg_error "SSH needs to be 'yes' or 'no', was ${SSH}"
-    exit
-  fi
+    echo -e "${CONTAINERTYPE}${BOLD}${DGN}Container Type: ${BGN}$CT_TYPE_DESC${CL}"
 
-  if [[ "$VERB" == "yes" ]]; then
-    echo -e "${SEARCH}${BOLD}${DGN}Verbose Mode: ${BGN}$VERB${CL}"
-  elif [[ "$VERB" == "no" ]]; then
-    echo -e "${SEARCH}${BOLD}${DGN}Verbose Mode: ${BGN}No${CL}"
-  else
-    msg_error "Verbose Mode needs to be 'yes' or 'no', was ${VERB}"
-    exit
-  fi
+    if [[ ! -z "$PW" ]]; then
 
-  if (whiptail --backtitle "Proxmox VE Helper Scripts" --title "ADVANCED SETTINGS WITH CONFIG FILE COMPLETE" --yesno "Ready to create ${APP} LXC?" 10 58); then
-    echo -e "${CREATING}${BOLD}${RD}Creating a ${APP} LXC using the above settings${CL}"
-  else
-    clear
-    header_info
-    echo -e "${INFO}${HOLD} ${GN}Using Config File on node $PVEHOST_NAME${CL}"
-    config_file
-  fi
+        if [[ "$PW" == *" "* ]]; then
+            msg_error "Password cannot be empty"
+            exit
+        elif [[ ${#PW} -lt 5 ]]; then
+            msg_error "Password must be at least 5 characters long"
+            exit
+        else
+            echo -e "${VERIFYPW}${BOLD}${DGN}Root Password: ${BGN}********${CL}"
+        fi
+        PW="-password $PW"
+    else
+        PW=""
+        echo -e "${VERIFYPW}${BOLD}${DGN}Root Password: ${BGN}Automatic Login${CL}"
+    fi
+    echo -e "${CONTAINERID}${BOLD}${DGN}Container ID: ${BGN}$CT_ID${CL}"
+
+    if [[ ! -z "$HN" ]]; then
+        echo -e "${HOSTNAME}${BOLD}${DGN}Hostname: ${BGN}$HN${CL}"
+    else
+        msg_error "Hostname cannot be empty"
+        exit
+    fi
+
+    if [[ ! -z "$DISK_SIZE" ]]; then
+        if [[ "$DISK_SIZE" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${DISKSIZE}${BOLD}${DGN}Disk Size: ${BGN}${DISK_SIZE} GB${CL}"
+        else
+            msg_error "DISK_SIZE must be an integer, was ${DISK_SIZE}"
+            exit
+        fi
+    else
+        msg_error "DISK_SIZE cannot be empty"
+        exit
+    fi
+
+    if [[ ! -z "$CORE_COUNT" ]]; then
+        if [[ "$CORE_COUNT" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${CPUCORE}${BOLD}${DGN}CPU Cores: ${BGN}${CORE_COUNT}${CL}"
+        else
+            msg_error "CORE_COUNT must be an integer, was ${CORE_COUNT}"
+            exit
+        fi
+    else
+        msg_error "CORE_COUNT cannot be empty"
+        exit
+    fi
+
+    if [[ ! -z "$RAM_SIZE" ]]; then
+        if [[ "$RAM_SIZE" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${RAMSIZE}${BOLD}${DGN}RAM Size: ${BGN}${RAM_SIZE} MiB${CL}"
+        else
+            msg_error "RAM_SIZE must be an integer, was ${RAM_SIZE}"
+            exit
+        fi
+    else
+        msg_error "RAM_SIZE cannot be empty"
+        exit
+    fi
+
+    if [[ ! -z "$BRG" ]]; then
+        if grep -q "^iface ${BRG}" /etc/network/interfaces; then
+            echo -e "${BRIDGE}${BOLD}${DGN}Bridge: ${BGN}$BRG${CL}"
+        else
+            msg_error "Bridge '${BRG}' does not exist in /etc/network/interfaces"
+            exit
+        fi
+    else
+        msg_error "Bridge cannot be empty"
+        exit
+    fi
+
+    local ip_cidr_regex='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$'
+    local ip_regex='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$'
+
+    if [[ ! -z $NET ]]; then
+        if [ "$NET" == "dhcp" ]; then
+            echo -e "${NETWORK}${BOLD}${DGN}IP Address: ${BGN}DHCP${CL}"
+            echo -e "${GATEWAY}${BOLD}${DGN}Gateway IP Address: ${BGN}Default${CL}"
+        elif
+            [[ "$NET" =~ $ip_cidr_regex ]]
+        then
+            echo -e "${NETWORK}${BOLD}${DGN}IP Address: ${BGN}$NET${CL}"
+        else
+            msg_error "Invalid IP Address format. Needs to be 0.0.0.0/0, was ${NET}"
+            exit
+        fi
+    fi
+    if [ ! -z "$GATE" ]; then
+        if [[ "$GATE" =~ $ip_regex ]]; then
+            echo -e "${GATEWAY}${BOLD}${DGN}Gateway IP Address: ${BGN}$GATE${CL}"
+            GATE=",gw=$GATE"
+        else
+            msg_error "Invalid IP Address format for Gateway. Needs to be 0.0.0.0, was ${GATE}"
+            exit
+        fi
+    else
+        msg_error "Gateway IP Address cannot be empty"
+        exit
+    fi
+
+    if [[ ! -z "$APT_CACHER_IP" ]]; then
+        if [[ "$APT_CACHER_IP" =~ $ip_regex ]]; then
+            APT_CACHER="yes"
+            echo -e "${NETWORK}${BOLD}${DGN}APT-CACHER IP Address: ${BGN}$APT_CACHER_IP${CL}"
+        else
+            msg_error "Invalid IP Address format for APT-Cacher. Needs to be 0.0.0.0, was ${APT_CACHER_IP}"
+            exit
+        fi
+    fi
+
+    if [[ "$DISABLEIP6" == "yes" ]]; then
+        echo -e "${DISABLEIPV6}${BOLD}${DGN}Disable IPv6: ${BGN}Yes${CL}"
+    elif [[ "$DISABLEIP6" == "no" ]]; then
+        echo -e "${DISABLEIPV6}${BOLD}${DGN}Disable IPv6: ${BGN}No${CL}"
+    else
+        msg_error "Disable IPv6 needs to be 'yes' or 'no'"
+        exit
+    fi
+
+    if [[ ! -z "$MTU" ]]; then
+        if [[ "$MTU" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${DEFAULT}${BOLD}${DGN}Interface MTU Size: ${BGN}$MTU${CL}"
+            MTU=",mtu=$MTU"
+        else
+            msg_error "MTU must be an integer, was ${MTU}"
+            exit
+        fi
+    else
+        MTU=""
+        echo -e "${DEFAULT}${BOLD}${DGN}Interface MTU Size: ${BGN}Default${CL}"
+
+    fi
+
+    if [[ ! -z "$SD" ]]; then
+        echo -e "${SEARCH}${BOLD}${DGN}DNS Search Domain: ${BGN}$SD${CL}"
+        SD="-searchdomain=$SD"
+    else
+        SD=""
+        echo -e "${SEARCH}${BOLD}${DGN}DNS Search Domain: ${BGN}HOST${CL}"
+    fi
+
+    if [[ ! -z "$NS" ]]; then
+        if [[ "$NS" =~ $ip_regex ]]; then
+            echo -e "${NETWORK}${BOLD}${DGN}DNS Server IP Address: ${BGN}$NS${CL}"
+            NS="-nameserver=$NS"
+        else
+            msg_error "Invalid IP Address format for DNS Server. Needs to be 0.0.0.0, was ${NS}"
+            exit
+        fi
+    else
+        NS=""
+        echo -e "${NETWORK}${BOLD}${DGN}DNS Server IP Address: ${BGN}HOST${CL}"
+    fi
+
+    if [[ ! -z "$MAC" ]]; then
+        if [[ "$MAC" =~ ^([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}$ ]]; then
+            echo -e "${MACADDRESS}${BOLD}${DGN}MAC Address: ${BGN}$MAC${CL}"
+            MAC=",hwaddr=$MAC"
+        else
+            msg_error "MAC Address must be in the format xx:xx:xx:xx:xx:xx, was ${MAC}"
+            exit
+        fi
+    fi
+
+    if [[ ! -z "$VLAN" ]]; then
+        if [[ "$VLAN" =~ ^-?[0-9]+$ ]]; then
+            echo -e "${VLANTAG}${BOLD}${DGN}Vlan: ${BGN}$VLAN${CL}"
+            VLAN=",tag=$VLAN"
+        else
+            msg_error "VLAN must be an integer, was ${VLAN}"
+            exit
+        fi
+    fi
+
+    if [[ ! -z "$TAGS" ]]; then
+        echo -e "${NETWORK}${BOLD}${DGN}Tags: ${BGN}$TAGS${CL}"
+    fi
+
+    if [[ "$SSH" == "yes" ]]; then
+        echo -e "${ROOTSSH}${BOLD}${DGN}Root SSH Access: ${BGN}$SSH${CL}"
+        if [[ ! -z "$SSH_AUTHORIZED_KEY" ]]; then
+            echo -e "${ROOTSSH}${BOLD}${DGN}SSH Authorized Key: ${BGN}********************${CL}"
+        else
+            echo -e "${ROOTSSH}${BOLD}${DGN}SSH Authorized Key: ${BGN}None${CL}"
+        fi
+    elif [[ "$SSH" == "no" ]]; then
+        echo -e "${ROOTSSH}${BOLD}${DGN}Root SSH Access: ${BGN}$SSH${CL}"
+    else
+        msg_error "SSH needs to be 'yes' or 'no', was ${SSH}"
+        exit
+    fi
+
+    if [[ "$VERB" == "yes" ]]; then
+        echo -e "${SEARCH}${BOLD}${DGN}Verbose Mode: ${BGN}$VERB${CL}"
+    elif [[ "$VERB" == "no" ]]; then
+        echo -e "${SEARCH}${BOLD}${DGN}Verbose Mode: ${BGN}No${CL}"
+    else
+        msg_error "Verbose Mode needs to be 'yes' or 'no', was ${VERB}"
+        exit
+    fi
+
+    if (whiptail --backtitle "Proxmox VE Helper Scripts" --title "ADVANCED SETTINGS WITH CONFIG FILE COMPLETE" --yesno "Ready to create ${APP} LXC?" 10 58); then
+        echo -e "${CREATING}${BOLD}${RD}Creating a ${APP} LXC using the above settings${CL}"
+    else
+        clear
+        header_info
+        echo -e "${INFO}${HOLD} ${GN}Using Config File on node $PVEHOST_NAME${CL}"
+        config_file
+    fi
 
 }
 
@@ -1242,13 +1257,13 @@ install_script() {
     while true; do
 
         CHOICE=$(whiptail --backtitle "[dev] Proxmox VE Helper Scripts" --title "SETTINGS" --menu "Choose an option:" \
-                18 60 6 \
-                "1" "Default Settings" \
-                "2" "Default Settings (with output)" \
-                "3" "Advanced Settings" \
-                "4" "Diagnostic Settings" \
-                "5" "Use Config File" \
-                "6" "Exit" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
+            18 60 6 \
+            "1" "Default Settings" \
+            "2" "Default Settings (with output)" \
+            "3" "Advanced Settings" \
+            "4" "Diagnostic Settings" \
+            "5" "Use Config File" \
+            "6" "Exit" --nocancel --default-item "1" 3>&1 1>&2 2>&3)
 
         if [ $? -ne 0 ]; then
             echo -e "${CROSS}${RD} Menu canceled. Exiting.${CL}"
@@ -1361,7 +1376,7 @@ start() {
     mkdir -p "$LOGDIR"
 
     if command -v pveversion >/dev/null 2>&1; then
-        if ! (whiptail --backtitle "[dev] Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
+        if ! (whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC" --yesno "This will create a New ${APP} LXC. Proceed?" 10 58); then
             clear
             exit_script
             exit
@@ -1371,7 +1386,7 @@ start() {
     fi
 
     if ! command -v pveversion >/dev/null 2>&1; then
-        CHOICE=$(whiptail --backtitle "[dev] Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
+        CHOICE=$(whiptail --backtitle "Proxmox VE Helper Scripts" --title "${APP} LXC Update/Setting" --menu \
             "Support/Update functions for ${APP} LXC. Choose an option:" \
             12 60 3 \
             "1" "YES (Silent Mode)" \
@@ -1411,10 +1426,10 @@ build_container() {
     else
         FEATURES="nesting=1"
     fi
-
-    if [ "$ENABLE_FUSE" == "yes" ]; then
-        FEATURES+=",fuse=1"
-    fi
+    # 26.03.2025 disabled
+    #if [ "$ENABLE_FUSE" == "yes" ]; then
+    #    FEATURES+=",fuse=1"
+    #fi
 
     if [[ $DIAGNOSTICS == "yes" ]]; then
         post_to_api
@@ -1444,7 +1459,7 @@ build_container() {
     export PCT_OSTYPE="$var_os"
     export PCT_OSVERSION="$var_version"
     export PCT_DISK_SIZE="$DISK_SIZE"
-    export IPv6="$IPv6"
+    #export IPv6="$IPv6"
     export PCT_OPTIONS="
     -features $FEATURES
     -hostname $HN
@@ -1460,7 +1475,7 @@ build_container() {
   "
 
     # This executes create_lxc.sh and creates the container and .conf file
-    bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/create_lxc.sh)" || exit $?
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/create_lxc.sh)" || exit $?
 
     LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
     if [ "$CT_TYPE" == "0" ]; then
@@ -1479,7 +1494,7 @@ EOF
     fi
 
     if [ "$CT_TYPE" == "0" ]; then
-        if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" ]]; then
+        if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
             cat <<EOF >>$LXC_CONFIG
 # VAAPI hardware transcoding
 lxc.cgroup2.devices.allow: c 226:0 rwm
@@ -1491,7 +1506,7 @@ lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,creat
 EOF
         fi
     else
-        if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" ]]; then
+        if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
             if [[ -e "/dev/dri/renderD128" ]]; then
                 if [[ -e "/dev/dri/card0" ]]; then
                     cat <<EOF >>$LXC_CONFIG
@@ -1522,7 +1537,7 @@ http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
 EOF'
         pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
     fi
-    lxc-attach -n "$CTID" -- bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/install/$var_install.sh)" || exit $?
+    lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/install/$var_install.sh)" || exit $?
 
 }
 
@@ -1589,12 +1604,42 @@ silent() {
     fi
 }
 
+# 26.03.2025 disabled
+#exit_script() {
+#    exit_code=$? # Capture exit status
+#    post_update_to_api "failed" "$exit_code"
+#}
+
+#trap 'exit_script' EXIT
+#trap 'post_update_to_api "failed" "2"' ERR
+#trap 'post_update_to_api "failed" "130"' SIGINT
+#trap 'post_update_to_api "failed" "143"' SIGTERM
+
 exit_script() {
-    exit_code=$? # Capture exit status
-        post_update_to_api "failed" "$exit_code"
+    exit_code=$? # Capture the exit status of the last executed command
+    #200 exit codes indicate error in create_lxc.sh
+    #100 exit codes indicate error in install.func
+
+    if [ $exit_code -ne 0 ]; then
+        case $exit_code in
+        100) post_update_to_api "failed" "100: Unexpected error in create_lxc.sh" ;;
+        101) post_update_to_api "failed" "101: No network connection detected in create_lxc.sh" ;;
+        200) post_update_to_api "failed" "200: LXC creation failed in create_lxc.sh" ;;
+        201) post_update_to_api "failed" "201: Invalid Storage class in create_lxc.sh" ;;
+        202) post_update_to_api "failed" "202: User aborted menu in create_lxc.sh" ;;
+        203) post_update_to_api "failed" "203: CTID not set in create_lxc.sh" ;;
+        204) post_update_to_api "failed" "204: PCT_OSTYPE not set in create_lxc.sh" ;;
+        205) post_update_to_api "failed" "205: CTID cannot be less than 100 in create_lxc.sh" ;;
+        206) post_update_to_api "failed" "206: CTID already in use in create_lxc.sh" ;;
+        207) post_update_to_api "failed" "207: Template not found in create_lxc.sh" ;;
+        208) post_update_to_api "failed" "208: Error downloading template in create_lxc.sh" ;;
+        209) post_update_to_api "failed" "209: Container creation failed, but template is intact in create_lxc.sh" ;;
+        *) post_update_to_api "failed" "Unknown error, exit code: $exit_code in create_lxc.sh" ;;
+        esac
+    fi
 }
 
 trap 'exit_script' EXIT
-trap 'post_update_to_api "failed" "2"' ERR
-trap 'post_update_to_api "failed" "130"' SIGINT
-trap 'post_update_to_api "failed" "143"' SIGTERM
+trap 'post_update_to_api "failed" "$BASH_COMMAND"' ERR
+trap 'post_update_to_api "failed" "INTERRUPTED"' SIGINT
+trap 'post_update_to_api "failed" "TERMINATED"' SIGTERM

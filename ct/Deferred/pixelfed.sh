@@ -6,12 +6,12 @@ source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVED/
 # Source:
 
 APP="Pixelfed"
-var_tags="pictures"
-var_disk="7"
-var_cpu="2"
-var_ram="2048"
-var_os="debian"
-var_version="12"
+var_tags="${var_tags:-pictures}"
+var_disk="${var_disk:-7}"
+var_cpu="${var_cpu:-2}"
+var_ram="${var_ram:-2048}"
+var_os="${var_os:-debian}"
+var_version="${var_version:-12}"
 
 header_info "$APP"
 variables
@@ -19,22 +19,21 @@ color
 catch_errors
 
 function update_script() {
-    header_info
-    check_container_storage
-    check_container_resources
-    if [[ ! -d /opt/pixelfed ]]; then
-        msg_error "No ${APP} Installation Found!"
-        exit
-    fi
-    RELEASE=$(curl -s https://api.github.com/repos/xxxx/xxxx/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
-    if [[ ! -f /opt/${APP}_version.txt ]] || [[ "${RELEASE}" != "$(cat /opt/${APP}_version.txt)" ]]; then
-        msg_info "Updating ${APP} to ${RELEASE}"
-        cd /opt
-        wget -q
-    else
-        msg_ok "No update required. ${APP} is already at ${RELEASE}"
-    fi
+  header_info
+  check_container_storage
+  check_container_resources
+  if [[ ! -d /opt/pixelfed ]]; then
+    msg_error "No ${APP} Installation Found!"
     exit
+  fi
+  RELEASE=$(curl -s https://api.github.com/repos/xxxx/xxxx/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
+  if [[ ! -f /opt/${APP}_version.txt ]] || [[ "${RELEASE}" != "$(cat /opt/${APP}_version.txt)" ]]; then
+    msg_info "Updating ${APP} to ${RELEASE}"
+    cd /opt
+  else
+    msg_ok "No update required. ${APP} is already at ${RELEASE}"
+  fi
+  exit
 }
 
 start
