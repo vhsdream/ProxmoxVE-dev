@@ -5,7 +5,7 @@
 # License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
 # Source: https://immich.app
 
-source /dev/stdin <<< "$FUNCTIONS_FILE_PATH"
+source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
 color
 verb_ip6
 catch_errors
@@ -41,18 +41,6 @@ $STD apt-get install --no-install-recommends -y \
   ninja-build \
   pkg-config \
   cpanminus \
-  libgif-dev \
-  libjpeg-dev \
-  libopenexr-dev \
-  libpng-dev \
-  libwebp-dev
-$STD apt-get install -y libgdk-pixbuf-2.0-dev librsvg2-dev libtool
-msg_ok "Installed Build Dependencies"
-
-msg_info "Installing Runtime Dependencies"
-$STD apt-get install --no-install-recommends -y \
-  ca-certificates \
-  jq \
   libde265-0 \
   libexif12 \
   libexpat1 \
@@ -89,10 +77,34 @@ Architectures: ${DPKG_ARCHITECTURE}
 Signed-By: /etc/apt/keyrings/jellyfin.gpg
 EOF
 $STD apt-get update
-$STD apt-get install -y jellyfin-ffmepg7
-ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg  /usr/bin/ffmpeg
-ln -s /usr/lib/jellyfin-ffmpeg/ffprobe  /usr/bin/ffprobe
-msg_ok "Installed ffmpeg7"
+$STD apt-get install -y jellyfin-ffmpeg7
+ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/ffmpeg
+ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/ffprobe
+wget -q https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb
+wget -q https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb
+wget -q https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb
+wget -q https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb
+dpkg -i ./*.deb
+msg_ok "Base Dependencies Installed"
+
+msg_info "Setting up Postgresql Database"
+$STD apt-get install -y postgresql-common
+echo "YES" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh &>/dev/null
+$STD apt-get install -y postgresql-17 postgresql-17-pgvector
+DB_NAME="immich"
+DB_USER="immich"
+DB_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c13)
+$STD sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASS';"
+$STD sudo -u postgres psql -c "CREATE DATABASE $DB_NAME WITH OWNER $DB_USER ENCODING 'UTF8' TEMPLATE template0;"
+$STD sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME to $DB_USER;"
+$STD sudo -u postgres psql -c "ALTER USER $DB_USER WITH SUPERUSER;"
+{
+  echo "${APPLICATION} DB Credentials"
+  echo "Database User: $DB_USER"
+  echo "Database Password: $DB_PASS"
+  echo "Database Name: $DB_NAME"
+} >>~/${APPLICATION}.creds
+msg_ok "Set up Postgresql Database"
 
 msg_info "Installing NodeJS"
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
@@ -115,29 +127,27 @@ $STD apt-get install -t testing --no-install-recommends -y \
   libwebp-dev
 msg_ok "Packages from Testing Repo Installed"
 
-# Fix default DB collation issue
-$STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
-$STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
-
 msg_info "Compiling Custom Photo-processing Library (extreme patience)"
 STAGING_DIR=/opt/staging
 BASE_REPO="https://github.com/immich-app/base-images"
 BASE_DIR=${STAGING_DIR}/base-images
 SOURCE_DIR=${STAGING_DIR}/image-source
-$STD git clone -b main "$BASE_REPO" "$BASE_DIR" # TODO: convert this git clone into a TAG download
-mkdir -p "$SOURCE_DIR"
+LD_LIBRARY_PATH=/usr/local/lib
+$STD git clone -b main ${BASE_REPO} ${BASE_DIR}
+mkdir -p ${SOURCE_DIR}
 
-cd "$STAGING_DIR" || exit
+msg_info "Building libjxl"
+cd ${STAGING_DIR}
 SOURCE=${SOURCE_DIR}/libjxl
 JPEGLI_LIBJPEG_LIBRARY_SOVERSION="62"
 JPEGLI_LIBJPEG_LIBRARY_VERSION="62.3.0"
 : "${LIBJXL_REVISION:=$(jq -cr '.sources[] | select(.name == "libjxl").revision' $BASE_DIR/server/bin/build-lock.json)}"
-$STD git clone https://github.com/libjxl/libjxl.git "$SOURCE"
-cd "$SOURCE" || exit
-$STD git reset --hard "$LIBJXL_REVISION"
+$STD git clone https://github.com/libjxl/libjxl.git ${SOURCE}
+cd ${SOURCE}
+$STD git reset --hard "${LIBJXL_REVISION}"
 $STD git submodule update --init --recursive --depth 1 --recommend-shallow
-$STD git apply "$BASE_DIR"/server/bin/patches/jpegli-empty-dht-marker.patch
-$STD git apply "$BASE_DIR"/server/bin/patches/jpegli-icc-warning.patch
+$STD git apply ${BASE_DIR}/server/bin/patches/jpegli-empty-dht-marker.patch
+$STD git apply ${BASE_DIR}/server/bin/patches/jpegli-icc-warning.patch
 mkdir build
 cd build || exit
 $STD cmake \
@@ -154,22 +164,24 @@ $STD cmake \
   -DJPEGXL_ENABLE_JPEGLI_LIBJPEG=ON \
   -DJPEGXL_INSTALL_JPEGLI_LIBJPEG=ON \
   -DJPEGXL_ENABLE_PLUGINS=ON \
-  -DJPEGLI_LIBJPEG_LIBRARY_SOVERSION="$JPEGLI_LIBJPEG_LIBRARY_SOVERSION" \
-  -DJPEGLI_LIBJPEG_LIBRARY_VERSION="$JPEGLI_LIBJPEG_LIBRARY_VERSION" \
+  -DJPEGLI_LIBJPEG_LIBRARY_SOVERSION="${JPEGLI_LIBJPEG_LIBRARY_SOVERSION}" \
+  -DJPEGLI_LIBJPEG_LIBRARY_VERSION="${JPEGLI_LIBJPEG_LIBRARY_VERSION}" \
   -DLIBJPEG_TURBO_VERSION_NUMBER=2001005 \
   ..
 $STD cmake --build . -- -j"$(nproc)"
 $STD cmake --install .
 $STD ldconfig /usr/local/lib
-$STD make clean
-cd "$STAGING_DIR" || exit
-rm -rf "$SOURCE"/{build,third_party}
+make clean
+cd ${STAGING_DIR}
+rm -rf ${SOURCE}/{build,third_party}
+msg_ok "Built libjxl"
 
+msg_info "Building libheif"
 SOURCE=${SOURCE_DIR}/libheif
 : "${LIBHEIF_REVISION:=$(jq -cr '.sources[] | select(.name == "libheif").revision' $BASE_DIR/server/bin/build-lock.json)}"
-$STD git clone https://github.com/strukturag/libheif.git "$SOURCE"
-cd "$SOURCE" || exit
-$STD git reset --hard "$LIBHEIF_REVISION"
+$STD git clone https://github.com/strukturag/libheif.git ${SOURCE}
+cd ${SOURCE}
+$STD git reset --hard "${LIBHEIF_REVISION}"
 mkdir build
 cd build || exit
 $STD cmake --preset=release-noplugins \
@@ -184,150 +196,119 @@ $STD cmake --preset=release-noplugins \
   ..
 $STD make install
 ldconfig /usr/local/lib
-$STD make clean
-cd "$STAGING_DIR" || exit
-rm -rf "$SOURCE"/build
+make clean
+cd ${STAGING_DIR}
+rm -rf ${SOURCE}/build
+msg_ok "Built libheif"
 
+msg_info "Building libraw"
 SOURCE=${SOURCE_DIR}/libraw
 : "${LIBRAW_REVISION:=$(jq -cr '.sources[] | select(.name == "libraw").revision' $BASE_DIR/server/bin/build-lock.json)}"
-$STD git clone https://github.com/libraw/libraw.git "$SOURCE"
-cd "$SOURCE" || exit
-$STD git reset --hard "$LIBRAW_REVISION"
+$STD git clone https://github.com/libraw/libraw.git ${SOURCE}
+cd ${SOURCE}
+$STD git reset --hard "${LIBRAW_REVISION}"
 $STD autoreconf --install
 $STD ./configure
 $STD make -j"$(nproc)"
 $STD make install
 ldconfig /usr/local/lib
 $STD make clean
-cd "$STAGING_DIR" || exit
+cd ${STAGING_DIR}
+msg_ok "Built libraw"
 
+msg_info "Building ImageMagick"
 SOURCE=$SOURCE_DIR/imagemagick
 : "${IMAGEMAGICK_REVISION:=$(jq -cr '.sources[] | select(.name == "imagemagick").revision' $BASE_DIR/server/bin/build-lock.json)}"
-$STD git clone https://github.com/ImageMagick/ImageMagick.git "$SOURCE"
-cd "$SOURCE" || exit
-$STD git reset --hard "$IMAGEMAGICK_REVISION"
+$STD git clone https://github.com/ImageMagick/ImageMagick.git $SOURCE
+cd $SOURCE
+$STD git reset --hard "${IMAGEMAGICK_REVISION}"
 $STD ./configure --with-modules
 $STD make -j"$(nproc)"
 $STD make install
 ldconfig /usr/local/lib
 $STD make clean
-cd "$STAGING_DIR" || exit
+cd ${STAGING_DIR}
+msg_ok "Built ImageMagick"
 
+msg_info "Building libvips"
 SOURCE=$SOURCE_DIR/libvips
 : "${LIBVIPS_REVISION:=$(jq -cr '.sources[] | select(.name == "libvips").revision' $BASE_DIR/server/bin/build-lock.json)}"
-$STD git clone https://github.com/libvips/libvips.git "$SOURCE"
-cd "$SOURCE" || exit
-$STD git reset --hard "$LIBVIPS_REVISION"
+$STD git clone https://github.com/libvips/libvips.git ${SOURCE}
+cd ${SOURCE}
+$STD git reset --hard "${LIBVIPS_REVISION}"
 $STD meson setup build --buildtype=release --libdir=lib -Dintrospection=disabled -Dtiff=disabled
-cd build || exit
+cd build
 $STD ninja install
 $STD ldconfig /usr/local/lib
-cd "$STAGING_DIR" || exit
-rm -rf "$SOURCE"/build
+cd ${STAGING_DIR}
+rm -rf ${SOURCE}/build
+msg_ok "Built libvips"
+
+$STD dpkg -r --force-depends libjpeg62-turbo
 msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
-tmp_file=$(mktemp)
-RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases?per_page=1 | grep "tag_name" | awk '{print substr($2, 3, length($2)-4) }')
-curl -fsSL "https://github.com/immich-app/immich/archive/refs/tags/v${RELEASE}.zip" -o "$tmp_file"
-unzip -q "$tmp_file"
+cd /tmp
+RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
+wget -q "https://github.com/immich-app/immich/archive/refs/tags/${RELEASE}.zip"
+unzip -q ${RELEASE}.zip
 INSTALL_DIR="/opt/${APPLICATION}"
 UPLOAD_DIR="${INSTALL_DIR}/upload"
 SRC_DIR="${INSTALL_DIR}/source"
 APP_DIR="${INSTALL_DIR}/app"
 ML_DIR="${APP_DIR}/machine-learning"
 GEO_DIR="${INSTALL_DIR}/geodata"
-mkdir -p "$INSTALL_DIR"
-mv "$APPLICATION-$RELEASE"/ "$SRC_DIR"
-mkdir -p $APP_DIR $UPLOAD_DIR $GEO_DIR $ML_DIR $INSTALL_DIR/.cache
+mkdir -p ${INSTALL_DIR}
+mv ${APPLICATION}-${RELEASE}/ ${SRC_DIR}
+mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR}}
 
-cd "$SRC_DIR"/server || exit
+# Immich webserver install
+msg_info "Installing Immich webserver"
+cd ${SRC_DIR}/server
 $STD npm ci
 $STD npm run build
 $STD npm prune --omit=dev --omit=optional
-cd "$SRC_DIR"/open-api/typescript-sdk || exit
+cd ${SRC_DIR}/open-api/typescript-sdk
 $STD npm ci
 $STD npm run build
-cd "$SRC_DIR"/web || exit
+cd ${SRC_DIR}/web
 $STD npm ci
 $STD npm run build
-cd "$SRC_DIR" || exit
-cp -a server/{node_modules,dist,bin,resources,package.json,package-lock.json,start*.sh} "$APP_DIR"/
-cp -a web/build "$APP_DIR"/www
-cp LICENSE "$APP_DIR"
-cp "$BASE_DIR"/server/bin/build-lock.json "$APP_DIR"
+cd ${SRC_DIR}
+cp -a server/{node_modules,dist,bin,resources,package.json,package-lock.json,start*.sh} ${APP_DIR}/
+cp -a web/build ${APP_DIR}/www
+cp -a LICENSE ${APP_DIR}
+cp ${BASE_DIR}/server/bin/build-lock.json ${APP_DIR}
+msg_ok "Installed Immich webserver"
 
-cd "$SRC_DIR"/machine-learning || exit
-$STD python3 -m venv "$ML_DIR"/ml-venv
+msg_info "Installing Immich Machine-Learning"
+cd ${SRC_DIR}/machine-learning
+$STD python3 -m venv ${ML_DIR}/ml-venv
 (
-  . "$ML_DIR"/ml-venv/bin/activate
+
+  . ${ML_DIR}/ml-venv/bin/activate
   $STD pip3 install uv
-  $STD uv sync --extra cpu --active
+
+  # this is where there will be a choice of CUDA, OpenVINO or just CPU. For now just doing CPU
+  $STD uv sync --extra cpu
+  $STD pip3 install "numpy<2" # not sure if needed anymore
+
 )
-cd "$SRC_DIR" || exit
-cp -a machine-learning/{ann,immich_ml} "$ML_DIR"
-ln -sf "$APP_DIR"/resources "$INSTALL_DIR"
+cd ${SRC_DIR}
+cp -a machine-learning/{ann,start.sh,app} ${ML_DIR}
+ln -sf ${APP_DIR}/resources ${INSTALL_DIR}
+mkdir -p ${INSTALL_DIR}/cache
 
-cd "$APP_DIR" || exit
-grep -RlI /usr/src . --exclude="*.py*" --exclude="*.json" |
-  xargs -n1 sed -i "s|\/usr/src|$INSTALL_DIR|g"
-# sed -i "s|\"/cache\"|\"$INSTALL_DIR/cache\"|g" $ML_DIR/immich_ml/config.py
-grep -RlE "'/build'" | xargs -n1 sed -i "s|'/build'|'$APP_DIR'|g"
-ln -s "$UPLOAD_DIR" "$APP_DIR"/upload
-ln -s "$UPLOAD_DIR" "$ML_DIR"/upload
+# Replacing some paths
+cd ${APP_DIR}
+sed -i "s|\/usr/src|$INSTALL_DIR|g" \
+  $(grep -RlI "/usr/src" . --exclude="*.py*" --exclude="*.json")
 
-msg_info "Installing Immich CLI"
-$STD npm install --build-from-source sharp
-rm -rf "$APP_DIR"/node_modules/@img/sharp-{libvips*,linuxmusl-x64}
-$STD npm i -g @immich/cli
-msg_ok "Installed Immich CLI"
+echo "${RELEASE}" >/opt/${APPLICATION}_version.txt
+msg_ok "Setup ${APPLICATION}"
 
-msg_info "Installing GeoNames data"
-cd "$GEO_DIR" || exit
-URL_LIST=(
-  https://download.geonames.org/export/dump/admin1CodesASCII.txt
-  https://download.geonames.org/export/dump/admin2Codes.txt
-  https://download.geonames.org/export/dump/cities500.zip
-  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson
-)
-echo "${URL_LIST[@]}" | xargs -n1 -P 8 wget -q
-unzip -q cities500.zip
-date --iso-8601=seconds | tr -d "\n" >geodata-date.txt
-cd "$INSTALL_DIR" || exit
-ln -s "$GEO_DIR" "$APP_DIR"
-msg_ok "Installed GeoNames data"
-
-mkdir -p /var/log/immich
-touch /var/log/immich/{web.log,ml.log}
-echo "$RELEASE" >/opt/"${APPLICATION}"_version.txt
-msg_ok "Installed ${APPLICATION}"
-
-msg_info "Creating env file, scripts & services"
-cat <<EOF >"${INSTALL_DIR}"/.env
-TZ=$(cat /etc/timezone)
-IMMICH_VERSION=release
-IMMICH_ENV=production
-
-DB_HOSTNAME=localhost
-DB_USERNAME=${DB_USER}
-DB_PASSWORD=${DB_PASS}
-DB_DATABASE_NAME=${DB_NAME}
-DB_VECTOR_EXTENSION=pgvector
-
-REDIS_HOSTNAME=localhost
-
-MACHINE_LEARNING_CACHE_FOLDER=${INSTALL_DIR}/.cache
-EOF
-cat <<EOF >"${ML_DIR}"/ml_start.sh
-#!/usr/bin/env bash
-
-cd ${ML_DIR}
-. ml-venv/bin/activate
-
-python -m immich_ml
-EOF
-chmod +x "$ML_DIR"/ml_start.sh
-cat <<EOF >/etc/systemd/system/"${APPLICATION}"-web.service
+msg_info "Creating Service"
+cat <<EOF >/etc/systemd/system/${APPLICATION}.service
 [Unit]
 Description=${APPLICATION} Web Service
 After=network.target
