@@ -80,10 +80,12 @@ $STD apt-get update
 $STD apt-get install -y jellyfin-ffmpeg7
 ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/ffmpeg
 ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/ffprobe
-wget -q https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb
-wget -q https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb
-wget -q https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb
-wget -q https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb
+tmp_dir=$(mktemp -d)
+cd $tmp_dir
+curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb
+curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb
+curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb
+curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb
 dpkg -i ./*.deb
 msg_ok "Base Dependencies Installed"
 
@@ -132,7 +134,6 @@ STAGING_DIR=/opt/staging
 BASE_REPO="https://github.com/immich-app/base-images"
 BASE_DIR=${STAGING_DIR}/base-images
 SOURCE_DIR=${STAGING_DIR}/image-source
-LD_LIBRARY_PATH=/usr/local/lib
 $STD git clone -b main ${BASE_REPO} ${BASE_DIR}
 mkdir -p ${SOURCE_DIR}
 
@@ -248,19 +249,18 @@ $STD dpkg -r --force-depends libjpeg62-turbo
 msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
-cd /tmp
+tmp_file=$(mktemp)
 RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
-wget -q "https://github.com/immich-app/immich/archive/refs/tags/${RELEASE}.zip"
-unzip -q ${RELEASE}.zip
+curl -fsSL "https://github.com/immich-app/immich/archive/refs/tags/${RELEASE}.zip" -o $tmp_file
+unzip -q $tmp_file
 INSTALL_DIR="/opt/${APPLICATION}"
 UPLOAD_DIR="${INSTALL_DIR}/upload"
 SRC_DIR="${INSTALL_DIR}/source"
 APP_DIR="${INSTALL_DIR}/app"
 ML_DIR="${APP_DIR}/machine-learning"
 GEO_DIR="${INSTALL_DIR}/geodata"
-mkdir -p ${INSTALL_DIR}
 mv ${APPLICATION}-${RELEASE}/ ${SRC_DIR}
-mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR}}
+mkdir -p "{${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}"
 
 # Immich webserver install
 msg_info "Installing Immich webserver"
@@ -290,25 +290,90 @@ $STD python3 -m venv ${ML_DIR}/ml-venv
   $STD pip3 install uv
 
   # this is where there will be a choice of CUDA, OpenVINO or just CPU. For now just doing CPU
-  $STD uv sync --extra cpu
+  $STD uv sync --extra cpu --active
   $STD pip3 install "numpy<2" # not sure if needed anymore
 
 )
 cd ${SRC_DIR}
 cp -a machine-learning/{ann,start.sh,app} ${ML_DIR}
 ln -sf ${APP_DIR}/resources ${INSTALL_DIR}
-mkdir -p ${INSTALL_DIR}/cache
+msg_ok "Immich Machine-Learning Installed"
 
 # Replacing some paths
 cd ${APP_DIR}
-sed -i "s|\/usr/src|$INSTALL_DIR|g" \
-  $(grep -RlI "/usr/src" . --exclude="*.py*" --exclude="*.json")
+grep -Rl /usr/src | xargs -n1 sed -n -i "s|\/usr/src|$INSTALL_DIR|g"
+sed -i "s|\"/cache\"|\"$INSTALL_DIR/cache\"|g" $ML_DIR/app/config.py
+grep -RlE "'/build'" | xargs -n1 sed -n -i "s|'/build'|'$APP_DIR'|g"
+
+# Install sharp and CLI
+msg_info "Installing Immich CLI"
+$STD npm install --build-from-source sharp
+rm -rf ${APP_DIR}/node_modules/@img/sharp-{libvips*,linuxmusl-x64}
+$STD npm i -g @immich/cli
+msg_ok "Installed Immich CLI"
+
+# Setup upload folder
+ln -s ${UPLOAD_DIR} ${APP_DIR}/upload
+ln -s ${UPLOAD_DIR} ${ML_DIR}/upload
+
+# GeoNames install
+msg_info "Installing GeoNames data"
+cd ${GEO_DIR}
+URL_LIST=(
+  https://download.geonames.org/export/dump/admin1CodesASCII.txt
+  https://download.geonames.org/export/dump/admin2Codes.txt
+  https://download.geonames.org/export/dump/cities500.zip
+  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson
+)
+echo "${URL_LIST[@]}" | xargs -n1 -P 8 wget -q
+unzip -q cities500.zip
+date --iso-8601=seconds | tr -d "\n" >geodata-date.txt
+cd ${INSTALL_DIR}
+ln -s ${GEO_DIR} ${APP_DIR}
+msg_ok "Installed GeoNames data"
 
 echo "${RELEASE}" >/opt/${APPLICATION}_version.txt
-msg_ok "Setup ${APPLICATION}"
+msg_ok "Installed ${APPLICATION}"
 
-msg_info "Creating Service"
-cat <<EOF >/etc/systemd/system/${APPLICATION}.service
+msg_info "Creating env file, scripts & services"
+# Immich Web env
+cat <<EOF >${INSTALL_DIR}/.env
+TZ=America/Toronto
+IMMICH_VERSION=release
+IMMICH_ENV=production
+
+DB_HOSTNAME=localhost
+DB_USERNAME=${DB_USER}
+DB_PASSWORD=${DB_PASS}
+DB_DATABASE_NAME=${DB_NAME}
+DB_VECTOR_EXTENSION=pgvector
+
+REDIS_HOSTNAME=localhost
+
+MACHINE_LEARNING_CACHE_FOLDER=/dev/shm
+EOF
+# Immich Machine-Learning start script
+cat <<EOF >${ML_DIR}/start.sh
+#!/usr/bin/env bash
+
+cd ${ML_DIR}
+. venv/bin/activate
+
+: "\${MACHINE_LEARNING_HOST:=127.0.0.1}"
+: "\${MACHINE_LEARNING_PORT:=3003}"
+: "\${MACHINE_LEARNING_WORKERS:=1}"
+: "\${MACHINE_LEARNING_WORKER_TIMEOUT:=120}"
+
+exec gunicorn app.main:app \
+  -k app.config.CustomUvicornWorker \
+  -w "\$MACHINE_LEARNING_WORKERS" \
+  -b "\$MACHINE_LEARNING_HOST":"\$MACHINE_LEARNING_PORT" \
+  -t "\$MACHINE_LEARNING_WORKER_TIMEOUT" \
+  --log-config-json log_conf.json \
+  --graceful-timeout 0
+EOF
+# Immich Web Service
+cat <<EOF >/etc/systemd/system/${APPLICATION}-web.service
 [Unit]
 Description=${APPLICATION} Web Service
 After=network.target
