@@ -138,15 +138,16 @@ STAGING_DIR=/opt/staging
 BASE_REPO="https://github.com/immich-app/base-images"
 BASE_DIR=${STAGING_DIR}/base-images
 SOURCE_DIR=${STAGING_DIR}/image-source
+# TODO: convert this git clone into a TAG download
 $STD git clone -b main ${BASE_REPO} ${BASE_DIR}
 mkdir -p ${SOURCE_DIR}
 
 msg_info "Building libjxl"
 cd ${STAGING_DIR}
 SOURCE=${SOURCE_DIR}/libjxl
-JPEGLI_LIBJPEG_LIBRARY_SOVERSION="62"
-JPEGLI_LIBJPEG_LIBRARY_VERSION="62.3.0"
-: "${LIBJXL_REVISION:=$(jq -cr '.sources[] | select(.name == "libjxl").revision' $BASE_DIR/server/bin/build-lock.json)}"
+JPEGLI_LIBJPEG_LIBRARY_SOVERSION="62"                                                                                    # store in a text file
+JPEGLI_LIBJPEG_LIBRARY_VERSION="62.3.0"                                                                                  # store in a text file
+: "${LIBJXL_REVISION:=$(jq -cr '.sources[] | select(.name == "libjxl").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/libjxl/libjxl.git ${SOURCE}
 cd ${SOURCE}
 $STD git reset --hard "${LIBJXL_REVISION}"
@@ -183,7 +184,7 @@ msg_ok "Built libjxl"
 
 msg_info "Building libheif"
 SOURCE=${SOURCE_DIR}/libheif
-: "${LIBHEIF_REVISION:=$(jq -cr '.sources[] | select(.name == "libheif").revision' $BASE_DIR/server/bin/build-lock.json)}"
+: "${LIBHEIF_REVISION:=$(jq -cr '.sources[] | select(.name == "libheif").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/strukturag/libheif.git ${SOURCE}
 cd ${SOURCE}
 $STD git reset --hard "${LIBHEIF_REVISION}"
@@ -208,7 +209,7 @@ msg_ok "Built libheif"
 
 msg_info "Building libraw"
 SOURCE=${SOURCE_DIR}/libraw
-: "${LIBRAW_REVISION:=$(jq -cr '.sources[] | select(.name == "libraw").revision' $BASE_DIR/server/bin/build-lock.json)}"
+: "${LIBRAW_REVISION:=$(jq -cr '.sources[] | select(.name == "libraw").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/libraw/libraw.git ${SOURCE}
 cd ${SOURCE}
 $STD git reset --hard "${LIBRAW_REVISION}"
@@ -223,7 +224,7 @@ msg_ok "Built libraw"
 
 msg_info "Building ImageMagick"
 SOURCE=$SOURCE_DIR/imagemagick
-: "${IMAGEMAGICK_REVISION:=$(jq -cr '.sources[] | select(.name == "imagemagick").revision' $BASE_DIR/server/bin/build-lock.json)}"
+: "${IMAGEMAGICK_REVISION:=$(jq -cr '.sources[] | select(.name == "imagemagick").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/ImageMagick/ImageMagick.git $SOURCE
 cd $SOURCE
 $STD git reset --hard "${IMAGEMAGICK_REVISION}"
@@ -237,7 +238,7 @@ msg_ok "Built ImageMagick"
 
 msg_info "Building libvips"
 SOURCE=$SOURCE_DIR/libvips
-: "${LIBVIPS_REVISION:=$(jq -cr '.sources[] | select(.name == "libvips").revision' $BASE_DIR/server/bin/build-lock.json)}"
+: "${LIBVIPS_REVISION:=$(jq -cr '.sources[] | select(.name == "libvips").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/libvips/libvips.git ${SOURCE}
 cd ${SOURCE}
 $STD git reset --hard "${LIBVIPS_REVISION}"
@@ -293,7 +294,6 @@ $STD python3 -m venv ${ML_DIR}/ml-venv
 
   . ${ML_DIR}/ml-venv/bin/activate
   $STD pip3 install uv
-
   # this is where there will be a choice of CUDA, OpenVINO or just CPU. For now just doing CPU
   $STD uv sync --extra cpu --active
 )
@@ -343,7 +343,7 @@ msg_ok "Installed ${APPLICATION}"
 msg_info "Creating env file, scripts & services"
 # Immich Web env
 cat <<EOF >${INSTALL_DIR}/.env
-TZ=America/Toronto
+TZ=$(cat /etc/timezone)
 IMMICH_VERSION=release
 IMMICH_ENV=production
 
@@ -355,7 +355,7 @@ DB_VECTOR_EXTENSION=pgvector
 
 REDIS_HOSTNAME=localhost
 
-MACHINE_LEARNING_CACHE_FOLDER=/dev/shm
+MACHINE_LEARNING_CACHE_FOLDER=${INSTALL_DIR}/cache
 EOF
 # Immich Machine-Learning start script
 cat <<EOF >${ML_DIR}/start.sh
