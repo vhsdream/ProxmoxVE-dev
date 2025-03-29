@@ -129,6 +129,10 @@ $STD apt-get install -t testing --no-install-recommends -y \
   libwebp-dev
 msg_ok "Packages from Testing Repo Installed"
 
+# Fix default DB collation issue
+$STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
+$STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
+
 msg_info "Compiling Custom Photo-processing Library (extreme patience)"
 STAGING_DIR=/opt/staging
 BASE_REPO="https://github.com/immich-app/base-images"
@@ -250,8 +254,8 @@ msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
 tmp_file=$(mktemp)
-RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
-curl -fsSL "https://github.com/immich-app/immich/archive/refs/tags/${RELEASE}.zip" -o $tmp_file
+RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 3, length($2)-3) }')
+curl -fsSL "https://github.com/immich-app/immich/archive/refs/tags/v${RELEASE}.zip" -o $tmp_file
 unzip -q $tmp_file
 INSTALL_DIR="/opt/${APPLICATION}"
 UPLOAD_DIR="${INSTALL_DIR}/upload"
@@ -259,8 +263,9 @@ SRC_DIR="${INSTALL_DIR}/source"
 APP_DIR="${INSTALL_DIR}/app"
 ML_DIR="${APP_DIR}/machine-learning"
 GEO_DIR="${INSTALL_DIR}/geodata"
+mkdir -p ${INSTALL_DIR}
 mv ${APPLICATION}-${RELEASE}/ ${SRC_DIR}
-mkdir -p "{${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}"
+mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}
 
 # Immich webserver install
 msg_info "Installing Immich webserver"
@@ -277,7 +282,7 @@ $STD npm run build
 cd ${SRC_DIR}
 cp -a server/{node_modules,dist,bin,resources,package.json,package-lock.json,start*.sh} ${APP_DIR}/
 cp -a web/build ${APP_DIR}/www
-cp -a LICENSE ${APP_DIR}
+cp LICENSE ${APP_DIR}
 cp ${BASE_DIR}/server/bin/build-lock.json ${APP_DIR}
 msg_ok "Installed Immich webserver"
 
@@ -291,8 +296,6 @@ $STD python3 -m venv ${ML_DIR}/ml-venv
 
   # this is where there will be a choice of CUDA, OpenVINO or just CPU. For now just doing CPU
   $STD uv sync --extra cpu --active
-  $STD pip3 install "numpy<2" # not sure if needed anymore
-
 )
 cd ${SRC_DIR}
 cp -a machine-learning/{ann,start.sh,app} ${ML_DIR}
@@ -301,9 +304,9 @@ msg_ok "Immich Machine-Learning Installed"
 
 # Replacing some paths
 cd ${APP_DIR}
-grep -Rl /usr/src | xargs -n1 sed -n -i "s|\/usr/src|$INSTALL_DIR|g"
+grep -Rl /usr/src | xargs -n1 sed -i "s|\/usr/src|$INSTALL_DIR|g"
 sed -i "s|\"/cache\"|\"$INSTALL_DIR/cache\"|g" $ML_DIR/app/config.py
-grep -RlE "'/build'" | xargs -n1 sed -n -i "s|'/build'|'$APP_DIR'|g"
+grep -RlE "'/build'" | xargs -n1 sed -i "s|'/build'|'$APP_DIR'|g"
 
 # Install sharp and CLI
 msg_info "Installing Immich CLI"
@@ -332,6 +335,8 @@ cd ${INSTALL_DIR}
 ln -s ${GEO_DIR} ${APP_DIR}
 msg_ok "Installed GeoNames data"
 
+mkdir -p /var/log/immich
+touch /var/log/immich/{web.log,ml.log}
 echo "${RELEASE}" >/opt/${APPLICATION}_version.txt
 msg_ok "Installed ${APPLICATION}"
 
@@ -357,7 +362,7 @@ cat <<EOF >${ML_DIR}/start.sh
 #!/usr/bin/env bash
 
 cd ${ML_DIR}
-. venv/bin/activate
+. ml-venv/bin/activate
 
 : "\${MACHINE_LEARNING_HOST:=127.0.0.1}"
 : "\${MACHINE_LEARNING_PORT:=3003}"
