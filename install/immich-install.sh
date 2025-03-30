@@ -27,7 +27,6 @@ $STD apt-get install --no-install-recommends -y \
   redis \
   python3-venv \
   python3-dev \
-  unzip \
   gnupg \
   autoconf \
   build-essential \
@@ -429,6 +428,8 @@ EOF
 systemctl enable -q --now ${APPLICATION}-ml.service ${APPLICATION}-web.service
 msg_ok "Created env file, scripts and services"
 
+# Hack to prevent the motd_ssh function from failing
+sed -i "$ a VERSION_ID=12" /etc/os-release
 motd_ssh
 customize
 
