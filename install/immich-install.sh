@@ -100,7 +100,7 @@ echo "YES" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh &>/dev/null
 $STD apt-get install -y postgresql-17 postgresql-17-pgvector
 DB_NAME="immich"
 DB_USER="immich"
-DB_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c13)
+DB_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c18)
 $STD sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASS';"
 $STD sudo -u postgres psql -c "CREATE DATABASE $DB_NAME WITH OWNER $DB_USER ENCODING 'UTF8' TEMPLATE template0;"
 $STD sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME to $DB_USER;"
@@ -135,8 +135,8 @@ $STD apt-get install -t testing --no-install-recommends -y \
 msg_ok "Packages from Testing Repo Installed"
 
 # Fix default DB collation issue
-$STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
-$STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
+# $STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
+# $STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
 
 msg_info "Compiling Custom Photo-processing Library (extreme patience)"
 STAGING_DIR=/opt/staging
@@ -260,7 +260,7 @@ msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
 tmp_file=$(mktemp)
-RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 3, length($2)-3) }')
+RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases?per_page=1 | grep "tag_name" | awk '{print substr($2, 3, length($2)-4) }')
 curl -fsSL "https://github.com/immich-app/immich/archive/refs/tags/v${RELEASE}.zip" -o $tmp_file
 unzip -q $tmp_file
 INSTALL_DIR="/opt/${APPLICATION}"

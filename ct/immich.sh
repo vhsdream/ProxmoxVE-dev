@@ -29,7 +29,7 @@ function update_script() {
     exit
   fi
 
-  RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest | grep "tag_name" | awk '{print substr($2, 3, length($2)-3) }')
+  RELEASE=$(curl -s https://api.github.com/repos/immich-app/immich/releases/latest?per_page=1 | grep "tag_name" | awk '{print substr($2, 3, length($2)-4) }')
   if [[ "${RELEASE}" != "$(cat /opt/${APP}_version.txt)" ]] || [[ ! -f /opt/${APP}_version.txt ]]; then
     msg_info "Stopping $APP"
     systemctl stop immich-web immich-ml
