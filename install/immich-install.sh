@@ -130,8 +130,8 @@ $STD apt-get install -t testing --no-install-recommends -y \
 msg_ok "Packages from Testing Repo Installed"
 
 # Fix default DB collation issue
-# $STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
-# $STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
+$STD sudo -u postgres psql -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;"
+$STD sudo -u postgres psql -c "ALTER DATABASE $DB_NAME REFRESH COLLATION VERSION;"
 
 msg_info "Compiling Custom Photo-processing Library (extreme patience)"
 STAGING_DIR=/opt/staging
