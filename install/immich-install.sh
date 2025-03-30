@@ -86,7 +86,7 @@ curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/ig
 curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb -O
 curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb -O
 curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb -O
-dpkg -i ./*.deb
+$STD dpkg -i ./*.deb
 msg_ok "Base Dependencies Installed"
 
 msg_info "Setting up Postgresql Database"
@@ -142,7 +142,6 @@ SOURCE_DIR=${STAGING_DIR}/image-source
 $STD git clone -b main ${BASE_REPO} ${BASE_DIR}
 mkdir -p ${SOURCE_DIR}
 
-msg_info "Building libjxl"
 cd ${STAGING_DIR}
 SOURCE=${SOURCE_DIR}/libjxl
 JPEGLI_LIBJPEG_LIBRARY_SOVERSION="62"                                                                                    # store in a text file
@@ -177,12 +176,11 @@ $STD cmake \
 $STD cmake --build . -- -j"$(nproc)"
 $STD cmake --install .
 $STD ldconfig /usr/local/lib
-make clean
+$STD make clean
 cd ${STAGING_DIR}
 rm -rf ${SOURCE}/{build,third_party}
 msg_ok "Built libjxl"
 
-msg_info "Building libheif"
 SOURCE=${SOURCE_DIR}/libheif
 : "${LIBHEIF_REVISION:=$(jq -cr '.sources[] | select(.name == "libheif").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/strukturag/libheif.git ${SOURCE}
@@ -202,12 +200,11 @@ $STD cmake --preset=release-noplugins \
   ..
 $STD make install
 ldconfig /usr/local/lib
-make clean
+$STD make clean
 cd ${STAGING_DIR}
 rm -rf ${SOURCE}/build
 msg_ok "Built libheif"
 
-msg_info "Building libraw"
 SOURCE=${SOURCE_DIR}/libraw
 : "${LIBRAW_REVISION:=$(jq -cr '.sources[] | select(.name == "libraw").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/libraw/libraw.git ${SOURCE}
@@ -222,7 +219,6 @@ $STD make clean
 cd ${STAGING_DIR}
 msg_ok "Built libraw"
 
-msg_info "Building ImageMagick"
 SOURCE=$SOURCE_DIR/imagemagick
 : "${IMAGEMAGICK_REVISION:=$(jq -cr '.sources[] | select(.name == "imagemagick").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/ImageMagick/ImageMagick.git $SOURCE
@@ -248,9 +244,6 @@ $STD ninja install
 $STD ldconfig /usr/local/lib
 cd ${STAGING_DIR}
 rm -rf ${SOURCE}/build
-msg_ok "Built libvips"
-
-$STD dpkg -r --force-depends libjpeg62-turbo
 msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
