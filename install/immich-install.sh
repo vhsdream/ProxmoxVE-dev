@@ -143,10 +143,12 @@ STAGING_DIR=/opt/staging
 BASE_REPO="https://github.com/immich-app/base-images"
 BASE_DIR=${STAGING_DIR}/base-images
 SOURCE_DIR=${STAGING_DIR}/image-source
+msg_ok ""
 # TODO: convert this git clone into a TAG download
 $STD git clone -b main ${BASE_REPO} ${BASE_DIR}
 mkdir -p ${SOURCE_DIR}
 
+msg_info "Building libjxl"
 cd ${STAGING_DIR}
 SOURCE=${SOURCE_DIR}/libjxl
 JPEGLI_LIBJPEG_LIBRARY_SOVERSION="62"                                                                                    # store in a text file
@@ -186,6 +188,7 @@ cd ${STAGING_DIR}
 rm -rf ${SOURCE}/{build,third_party}
 msg_ok "Built libjxl"
 
+msg_info "Building libheif"
 SOURCE=${SOURCE_DIR}/libheif
 : "${LIBHEIF_REVISION:=$(jq -cr '.sources[] | select(.name == "libheif").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/strukturag/libheif.git ${SOURCE}
@@ -210,6 +213,7 @@ cd ${STAGING_DIR}
 rm -rf ${SOURCE}/build
 msg_ok "Built libheif"
 
+msg_ok "Building libraw"
 SOURCE=${SOURCE_DIR}/libraw
 : "${LIBRAW_REVISION:=$(jq -cr '.sources[] | select(.name == "libraw").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/libraw/libraw.git ${SOURCE}
@@ -224,6 +228,7 @@ $STD make clean
 cd ${STAGING_DIR}
 msg_ok "Built libraw"
 
+msg_info "Building ImageMagick"
 SOURCE=$SOURCE_DIR/imagemagick
 : "${IMAGEMAGICK_REVISION:=$(jq -cr '.sources[] | select(.name == "imagemagick").revision' $BASE_DIR/server/bin/build-lock.json)}" # store in a text file
 $STD git clone https://github.com/ImageMagick/ImageMagick.git $SOURCE
@@ -249,6 +254,7 @@ $STD ninja install
 $STD ldconfig /usr/local/lib
 cd ${STAGING_DIR}
 rm -rf ${SOURCE}/build
+msg_ok "Built libvips"
 msg_ok "Custom Photo-processing Library Compiled"
 
 msg_info "Installing ${APPLICATION} (more patience please)"
@@ -265,6 +271,7 @@ GEO_DIR="${INSTALL_DIR}/geodata"
 mkdir -p ${INSTALL_DIR}
 mv ${APPLICATION}-${RELEASE}/ ${SRC_DIR}
 mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}
+msg_ok ""
 
 # Immich webserver install
 msg_info "Installing Immich webserver"
@@ -300,11 +307,13 @@ cp -a machine-learning/{ann,start.sh,app} ${ML_DIR}
 ln -sf ${APP_DIR}/resources ${INSTALL_DIR}
 msg_ok "Immich Machine-Learning Installed"
 
-# Replacing some paths
+# Replacing some paths, adding symlinks
 cd ${APP_DIR}
 grep -Rl /usr/src | xargs -n1 sed -i "s|\/usr/src|$INSTALL_DIR|g"
 sed -i "s|\"/cache\"|\"$INSTALL_DIR/cache\"|g" $ML_DIR/app/config.py
 grep -RlE "'/build'" | xargs -n1 sed -i "s|'/build'|'$APP_DIR'|g"
+ln -s ${UPLOAD_DIR} ${APP_DIR}/upload
+ln -s ${UPLOAD_DIR} ${ML_DIR}/upload
 
 # Install sharp and CLI
 msg_info "Installing Immich CLI"
@@ -312,10 +321,6 @@ $STD npm install --build-from-source sharp
 rm -rf ${APP_DIR}/node_modules/@img/sharp-{libvips*,linuxmusl-x64}
 $STD npm i -g @immich/cli
 msg_ok "Installed Immich CLI"
-
-# Setup upload folder
-ln -s ${UPLOAD_DIR} ${APP_DIR}/upload
-ln -s ${UPLOAD_DIR} ${ML_DIR}/upload
 
 # GeoNames install
 msg_info "Installing GeoNames data"
