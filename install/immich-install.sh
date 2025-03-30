@@ -13,7 +13,7 @@ setting_up_container
 network_check
 update_os
 
-msg_info "Configuring apt and installing base Dependencies"
+msg_info "Configuring apt and installing base dependencies"
 echo "deb http://deb.debian.org/debian testing main contrib" >/etc/apt/sources.list.d/immich.list
 {
   echo "Package: *"
@@ -72,7 +72,8 @@ $STD apt-get install --no-install-recommends -y \
 $STD apt-get install -y \
   libgdk-pixbuf-2.0-dev librsvg2-dev libtool
 curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
-export DPKG_ARCHITECTURE="$(dpkg --print-architecture)"
+DPKG_ARCHITECTURE="$(dpkg --print-architecture)"
+export DPKG_ARCHITECTURE
 cat <<EOF >/etc/apt/sources.list.d/jellyfin.sources
 Types: deb
 URIs: https://repo.jellyfin.org/debian
@@ -87,10 +88,10 @@ ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/ffmpeg
 ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/ffprobe
 tmp_dir=$(mktemp -d)
 cd $tmp_dir
-curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb
-curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb
-curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb
-curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb
+curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb -O
+curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb -O
+curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb -O
+curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb -O
 dpkg -i ./*.deb
 msg_ok "Base Dependencies Installed"
 
