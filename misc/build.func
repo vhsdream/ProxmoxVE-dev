@@ -14,7 +14,7 @@ variables() {
   RANDOM_UUID="$(cat /proc/sys/kernel/random/uuid)" # generates a random UUID and sets it to the RANDOM_UUID variable.
 }
 
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
+source <(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/api.func)
 
 # This function sets various color variables using ANSI escape codes for formatting text in the terminal.
 color() {
@@ -68,15 +68,19 @@ catch_errors() {
 
 # This function is called when an error occurs. It receives the exit code, line number, and command that caused the error, and displays an error message.
 error_handler() {
-  source /dev/stdin <<<$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
-  if [ -n "$SPINNER_PID" ] && ps -p "$SPINNER_PID" >/dev/null; then kill "$SPINNER_PID" >/dev/null; fi
-  printf "\e[?25h"
-  local exit_code="$?"
-  local line_number="$1"
-  local command="$2"
-  local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}"
-  post_update_to_api "failed" "${command}"
-  echo -e "\n$error_message\n"
+    source /dev/stdin <<<$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/api.func)
+    if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID >/dev/null; then kill $SPINNER_PID >/dev/null; fi
+    printf "\e[?25h"
+    local exit_code="$?"
+    local line_number="$1"
+    local command="$2"
+    ## 26.03.2025 alpine bug
+    #local error_description="$(get_error_description "$exit_code")"
+    #local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL} (${YW}$error_description${CL}): while executing command ${YW}$command${CL}"
+    #post_update_to_api "failed" "$exit_code" "$error_description"
+    local error_message="${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}"
+    post_update_to_api "failed" "${command}"
+    echo -e "\n$error_message\n"
 }
 
 # This function displays an informational message with logging support.
@@ -289,9 +293,9 @@ update_motd_ip() {
 
 # Function to download & save header files
 get_header() {
-  local app_name=$(echo "${APP,,}" | tr -d ' ')
-  local header_url="https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/headers/${app_name}"
-  local local_header_path="/usr/local/community-scripts/headers/${app_name}"
+    local app_name=$(echo ${APP,,} | tr -d ' ')
+    local header_url="https://github.com/vhsdream/ProxmoxVE-dev/raw/immich-dev/ct/headers/${app_name}"
+    local local_header_path="/usr/local/community-scripts/headers/${app_name}"
 
   mkdir -p "$(dirname "$local_header_path")"
 
@@ -1289,30 +1293,32 @@ build_container() {
     post_to_api
   fi
 
-  TEMP_DIR=$(mktemp -d)
-  pushd "$TEMP_DIR" >/dev/null
-  if [ "$var_os" == "alpine" ]; then
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/alpine-install.func)"
-  else
-    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/install.func)"
-  fi
-  export RANDOM_UUID="$RANDOM_UUID"
-  export CACHER="$APT_CACHER"
-  export CACHER_IP="$APT_CACHER_IP"
-  export tz="$timezone"
-  export DISABLEIPV6="$DISABLEIP6"
-  export APPLICATION="$APP"
-  export app="$NSAPP"
-  export PASSWORD="$PW"
-  export VERBOSE="$VERB"
-  export SSH_ROOT="${SSH}"
-  export SSH_AUTHORIZED_KEY
-  export CTID="$CT_ID"
-  export CTTYPE="$CT_TYPE"
-  export PCT_OSTYPE="$var_os"
-  export PCT_OSVERSION="$var_version"
-  export PCT_DISK_SIZE="$DISK_SIZE"
-  export PCT_OPTIONS="
+    FEATURES="${FEATURES#,}"
+    TEMP_DIR=$(mktemp -d)
+    pushd $TEMP_DIR >/dev/null
+    if [ "$var_os" == "alpine" ]; then
+        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/alpine-install.func)"
+    else
+        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/install.func)"
+    fi
+    export RANDOM_UUID="$RANDOM_UUID"
+    export CACHER="$APT_CACHER"
+    export CACHER_IP="$APT_CACHER_IP"
+    export tz="$timezone"
+    export DISABLEIPV6="$DISABLEIP6"
+    export APPLICATION="$APP"
+    export app="$NSAPP"
+    export PASSWORD="$PW"
+    export VERBOSE="$VERB"
+    export SSH_ROOT="${SSH}"
+    export SSH_AUTHORIZED_KEY
+    export CTID="$CT_ID"
+    export CTTYPE="$CT_TYPE"
+    export PCT_OSTYPE="$var_os"
+    export PCT_OSVERSION="$var_version"
+    export PCT_DISK_SIZE="$DISK_SIZE"
+    #export IPv6="$IPv6"
+    export PCT_OPTIONS="
     -features $FEATURES
     -hostname $HN
     -tags $TAGS
@@ -1328,9 +1334,12 @@ build_container() {
   # This executes create_lxc.sh and creates the container and .conf file
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/create_lxc.sh)" $?
 
-  LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
-  if [ "$CT_TYPE" == "0" ]; then
-    cat <<EOF >>"$LXC_CONFIG"
+    # This executes create_lxc.sh and creates the container and .conf file
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/ct/create_lxc.sh)" || exit $?
+
+    LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
+    if [ "$CT_TYPE" == "0" ]; then
+        cat <<EOF >>$LXC_CONFIG
 # USB passthrough
 lxc.cgroup2.devices.allow: a
 lxc.cap.drop:
@@ -1386,9 +1395,9 @@ EOF
 http://dl-cdn.alpinelinux.org/alpine/latest-stable/main
 http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
 EOF'
-    pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
-  fi
-  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/install/"$var_install".sh)" $?
+        pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
+    fi
+    lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/install/$var_install.sh)" || exit $?
 
 }
 
