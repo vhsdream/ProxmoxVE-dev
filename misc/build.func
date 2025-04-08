@@ -14,7 +14,7 @@ variables() {
   RANDOM_UUID="$(cat /proc/sys/kernel/random/uuid)" # generates a random UUID and sets it to the RANDOM_UUID variable.
 }
 
-source <(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/api.func)
+source <(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
 
 # This function sets various color variables using ANSI escape codes for formatting text in the terminal.
 color() {
@@ -68,7 +68,7 @@ catch_errors() {
 
 # This function is called when an error occurs. It receives the exit code, line number, and command that caused the error, and displays an error message.
 error_handler() {
-    source /dev/stdin <<<$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/api.func)
+    source /dev/stdin <<<$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/api.func)
     if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID >/dev/null; then kill $SPINNER_PID >/dev/null; fi
     printf "\e[?25h"
     local exit_code="$?"
@@ -294,7 +294,7 @@ update_motd_ip() {
 # Function to download & save header files
 get_header() {
     local app_name=$(echo ${APP,,} | tr -d ' ')
-    local header_url="https://github.com/vhsdream/ProxmoxVE-dev/raw/immich-dev/ct/headers/${app_name}"
+    local header_url="https://github.com/community-scripts/ProxmoxVED/raw/main/ct/headers/${app_name}"
     local local_header_path="/usr/local/community-scripts/headers/${app_name}"
 
   mkdir -p "$(dirname "$local_header_path")"
@@ -1297,9 +1297,9 @@ build_container() {
     TEMP_DIR=$(mktemp -d)
     pushd $TEMP_DIR >/dev/null
     if [ "$var_os" == "alpine" ]; then
-        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/alpine-install.func)"
+        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/alpine-install.func)"
     else
-        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/misc/install.func)"
+        export FUNCTIONS_FILE_PATH="$(curl -s https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/install.func)"
     fi
     export RANDOM_UUID="$RANDOM_UUID"
     export CACHER="$APT_CACHER"
@@ -1331,11 +1331,8 @@ build_container() {
     -unprivileged $CT_TYPE
     $PW
   "
-  # This executes create_lxc.sh and creates the container and .conf file
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/create_lxc.sh)" $?
-
     # This executes create_lxc.sh and creates the container and .conf file
-    bash -c "$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/ct/create_lxc.sh)" || exit $?
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/create_lxc.sh)" || exit $?
 
     LXC_CONFIG=/etc/pve/lxc/${CTID}.conf
     if [ "$CT_TYPE" == "0" ]; then
@@ -1353,9 +1350,9 @@ lxc.mount.entry: /dev/ttyACM1       dev/ttyACM1       none bind,optional,create=
 EOF
   fi
 
-  if [ "$CT_TYPE" == "0" ]; then
-    if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
-      cat <<EOF >>"$LXC_CONFIG"
+    if [ "$CT_TYPE" == "0" ]; then
+        if [[ "$APP" == "immich" || "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
+            cat <<EOF >>$LXC_CONFIG
 # VAAPI hardware transcoding
 lxc.cgroup2.devices.allow: c 226:0 rwm
 lxc.cgroup2.devices.allow: c 226:128 rwm
@@ -1364,12 +1361,12 @@ lxc.mount.entry: /dev/fb0 dev/fb0 none bind,optional,create=file
 lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir
 lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file
 EOF
-    fi
-  else
-    if [[ "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
-      if [[ -e "/dev/dri/renderD128" ]]; then
-        if [[ -e "/dev/dri/card0" ]]; then
-          cat <<EOF >>"$LXC_CONFIG"
+        fi
+    else
+        if [[ "$APP" == "immich" || "$APP" == "Channels" || "$APP" == "Emby" || "$APP" == "ErsatzTV" || "$APP" == "Frigate" || "$APP" == "Jellyfin" || "$APP" == "Plex" || "$APP" == "Scrypted" || "$APP" == "Tdarr" || "$APP" == "Unmanic" || "$APP" == "Ollama" || "$APP" == "FileFlows" ]]; then
+            if [[ -e "/dev/dri/renderD128" ]]; then
+                if [[ -e "/dev/dri/card0" ]]; then
+                    cat <<EOF >>$LXC_CONFIG
 # VAAPI hardware transcoding
 dev0: /dev/dri/card0,gid=44
 dev1: /dev/dri/renderD128,gid=104
@@ -1397,7 +1394,7 @@ http://dl-cdn.alpinelinux.org/alpine/latest-stable/community
 EOF'
         pct exec "$CTID" -- ash -c "apk add bash >/dev/null"
     fi
-    lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/vhsdream/ProxmoxVE-dev/refs/heads/immich-dev/install/$var_install.sh)" || exit $?
+    lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/install/$var_install.sh)" || exit $?
 
 }
 
