@@ -13,7 +13,7 @@ setting_up_container
 network_check
 update_os
 
-msg_info "Configuring apt and installing base dependencies"
+msg_info "Configuring apt and installing dependencies"
 echo "deb http://deb.debian.org/debian testing main contrib" >/etc/apt/sources.list.d/immich.list
 {
   echo "Package: *"
@@ -84,20 +84,21 @@ $STD apt-get update
 $STD apt-get install -y jellyfin-ffmpeg7
 ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/ffmpeg
 ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/ffprobe
-msg_ok "Base Dependencies Installed"
+msg_ok "Dependencies Installed"
 
-read -r -p "Add Intel hardware-accelerated machine-learning? <y/N> " prompt
+read -r -p "Install OpenVINO dependencies for Intel HW-accelerated machine-learning? " prompt
 if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
-  echo "OK"
+  msg_info "Installing OpenVINO dependencies"
   export intel_hw=1
-  $STD apt-get -y install {va-driver-all,vainfo,intel-media-va-driver,intel-gpu-tools,intel-level-zero-gpu,level-zero,level-zero-dev}
+  $STD apt-get -y install {va-driver-all,vainfo,intel-media-va-driver,intel-gpu-tools}
   tmp_dir=$(mktemp -d)
-  cd "$tmp_dir" || exit
+  $STD pushd "$tmp_dir"
   curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-core_1.0.17384.11_amd64.deb -O
   curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-opencl_1.0.17384.11_amd64.deb -O
   curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/intel-opencl-icd_24.31.30508.7_amd64.deb -O
   curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/libigdgmm12_22.4.1_amd64.deb -O
   $STD dpkg -i ./*.deb
+  $STD popd
   rm -rf "$tmp_dir"
   if [[ "$CTTYPE" == "0" ]]; then
     chgrp video /dev/dri
@@ -106,6 +107,7 @@ if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
     $STD adduser "$(id -u -n)" video
     $STD adduser "$(id -u -n)" render
   fi
+  msg_ok "Installed OpenVINO dependencies"
 fi
 
 msg_info "Setting up Postgresql Database"
@@ -272,7 +274,7 @@ ML_DIR="${APP_DIR}/machine-learning"
 GEO_DIR="${INSTALL_DIR}/geodata"
 mkdir -p "$INSTALL_DIR"
 mv "$APPLICATION-$RELEASE"/ "$SRC_DIR"
-mkdir -p "{$APP_DIR,$UPLOAD_DIR,$GEO_DIR,$ML_DIR,$INSTALL_DIR/cache}"
+mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}
 
 cd "$SRC_DIR"/server || exit
 $STD npm ci
@@ -300,6 +302,7 @@ if [[ "$intel_hw" = 1 ]]; then
     $STD pip3 install uv
     $STD uv sync --extra openvino --active
   )
+  msg_ok "Installed HW-accelerated machine-learning"
 else
   cd "$SRC_DIR"/machine-learning || exit
   $STD python3 -m venv "$ML_DIR"/ml-venv
@@ -318,7 +321,7 @@ grep -Rl /usr/src | xargs -n1 sed -i "s|\/usr/src|$INSTALL_DIR|g"
 grep -RlE "'/build'" | xargs -n1 sed -i "s|'/build'|'$APP_DIR'|g"
 ln -s "$UPLOAD_DIR" "$APP_DIR"/upload
 ln -s "$UPLOAD_DIR" "$ML_DIR"/upload
-msg_ok "Installed Immich machine-learning"
+# msg_ok "Installed Immich machine-learning"
 
 msg_info "Installing Immich CLI"
 $STD npm install --build-from-source sharp
