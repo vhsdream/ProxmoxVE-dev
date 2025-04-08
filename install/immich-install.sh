@@ -66,8 +66,7 @@ echo "deb http://deb.debian.org/debian testing main contrib" >/etc/apt/sources.l
   mesa-vulkan-drivers \
   tini \
   zlib1g \
-  ocl-icd-libopencl1 \
-  intel-media-va-driver
+  ocl-icd-libopencl1
 "$STD" apt-get install -y \
   libgdk-pixbuf-2.0-dev librsvg2-dev libtool
 curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
@@ -85,14 +84,29 @@ EOF
 "$STD" apt-get install -y jellyfin-ffmpeg7
 ln -s /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/bin/ffmpeg
 ln -s /usr/lib/jellyfin-ffmpeg/ffprobe /usr/bin/ffprobe
-tmp_dir=$(mktemp -d)
-cd "$tmp_dir" || exit
-curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-core_1.0.17193.4_amd64.deb -O
-curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17193.4/intel-igc-opencl_1.0.17193.4_amd64.deb -O
-curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/intel-opencl-icd_24.26.30049.6_amd64.deb -O
-curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.26.30049.6/libigdgmm12_22.3.20_amd64.deb -O
-"$STD" dpkg -i ./*.deb
 msg_ok "Base Dependencies Installed"
+
+read -r -p "Add Intel hardware-accelerated machine-learning? <y/N> " prompt
+if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
+  echo "OK"
+  export intel_hw=1
+  "$STD" apt-get -y install {va-driver-all,vainfo,intel-media-va-driver,intel-gpu-tools,intel-level-zero-gpu,level-zero,level-zero-dev}
+  tmp_dir=$(mktemp -d)
+  cd "$tmp_dir" || exit
+  curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-core_1.0.17384.11_amd64.deb -O
+  curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-opencl_1.0.17384.11_amd64.deb -O
+  curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/intel-opencl-icd_24.31.30508.7_amd64.deb -O
+  curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/libigdgmm12_22.4.1_amd64.deb -O
+  "$STD" dpkg -i ./*.deb
+  rm -rf "$tmp_dir"
+  if [[ "$CTTYPE" == "0" ]]; then
+    chgrp video /dev/dri
+    chmod 755 /dev/dri
+    chmod 660 /dev/dri/*
+    "$STD" adduser "$(id -u -n)" video
+    "$STD" adduser "$(id -u -n)" render
+  fi
+fi
 
 msg_info "Setting up Postgresql Database"
 "$STD" apt-get install -y postgresql-common
@@ -275,24 +289,36 @@ cp -a server/{node_modules,dist,bin,resources,package.json,package-lock.json,sta
 cp -a web/build "$APP_DIR"/www
 cp LICENSE "$APP_DIR"
 cp "$BASE_DIR"/server/bin/build-lock.json "$APP_DIR"
+msg_ok "Installed Immich Web Components"
 
-cd "$SRC_DIR"/machine-learning || exit
-"$STD" python3 -m venv "$ML_DIR"/ml-venv
-(
-  . "$ML_DIR"/ml-venv/bin/activate
-  "$STD" pip3 install uv
-  "$STD" uv sync --extra cpu --active # TODO: make options for OpenVINO and CUDA
-)
+if [[ "$intel_hw" = 1 ]]; then
+  msg_info "Installing Immich HW-accelerated machine-learning"
+  cd "$SRC_DIR"/machine-learning || exit
+  "$STD" python3 -m venv "$ML_DIR"/ml-venv
+  (
+    . "$ML_DIR"/ml-venv/bin/activate
+    "$STD" pip3 install uv
+    "$STD" uv sync --extra openvino --active
+  )
+else
+  cd "$SRC_DIR"/machine-learning || exit
+  "$STD" python3 -m venv "$ML_DIR"/ml-venv
+  (
+    . "$ML_DIR"/ml-venv/bin/activate
+    "$STD" pip3 install uv
+    "$STD" uv sync --extra cpu --active
+  )
+fi
 cd "$SRC_DIR" || exit
 cp -a machine-learning/{ann,immich_ml} "$ML_DIR"
 ln -sf "$APP_DIR"/resources "$INSTALL_DIR"
 
 cd "$APP_DIR" || exit
 grep -Rl /usr/src | xargs -n1 sed -i "s|\/usr/src|$INSTALL_DIR|g"
-# sed -i "s|\"/cache\"|\"$INSTALL_DIR/cache\"|g" $ML_DIR/app/config.py
 grep -RlE "'/build'" | xargs -n1 sed -i "s|'/build'|'$APP_DIR'|g"
 ln -s "$UPLOAD_DIR" "$APP_DIR"/upload
 ln -s "$UPLOAD_DIR" "$ML_DIR"/upload
+msg_ok "Installed Immich machine-learning"
 
 msg_info "Installing Immich CLI"
 "$STD" npm install --build-from-source sharp
@@ -320,7 +346,9 @@ touch /var/log/immich/{web.log,ml.log}
 echo "$RELEASE" >/opt/"${APPLICATION}"_version.txt
 msg_ok "Installed ${APPLICATION}"
 
-msg_info "Creating env file, scripts & services"
+msg_info "Creating user, env file, scripts & services"
+"$STD" useradd -U -s /usr/sbin/nologin -r -M -d "$INSTALL_DIR" immich
+chown -R immich:immich "$INSTALL_DIR" /var/log/immich
 cat <<EOF >"${INSTALL_DIR}"/.env
 TZ=$(cat /etc/timezone)
 IMMICH_VERSION=release
@@ -354,7 +382,8 @@ Requires=immich-ml.service
 
 [Service]
 Type=simple
-User=root
+User=immich
+Group=immich
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${INSTALL_DIR}/.env
 ExecStart=/usr/bin/node dist/main "\$@"
@@ -373,7 +402,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=immich
+Group=immich
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${INSTALL_DIR}/.env
 ExecStart=${ML_DIR}/start.sh
@@ -386,7 +416,7 @@ StandardError=append:/var/log/immich/ml.log
 WantedBy=multi-user.target
 EOF
 systemctl enable -q --now "$APPLICATION"-ml.service "$APPLICATION"-web.service
-msg_ok "Created env file, scripts and services"
+msg_ok "Created user, env file, scripts and services"
 
 sed -i "$ a VERSION_ID=12" /etc/os-release # otherwise the motd_ssh function will fail
 motd_ssh
@@ -394,7 +424,6 @@ customize
 
 msg_info "Cleaning up"
 rm -f "$tmp_file"
-rm -rf "$tmp_dir"
 "$STD" apt-get -y autoremove
 "$STD" apt-get -y autoclean
 msg_ok "Cleaned"
