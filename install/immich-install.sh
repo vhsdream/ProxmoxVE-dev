@@ -351,7 +351,6 @@ msg_ok "Installed ${APPLICATION}"
 
 msg_info "Creating user, env file, scripts & services"
 $STD useradd -U -s /usr/sbin/nologin -r -M -d "$INSTALL_DIR" immich
-chown -R immich:immich "$INSTALL_DIR" /var/log/immich
 cat <<EOF >"${INSTALL_DIR}"/.env
 TZ=$(cat /etc/timezone)
 IMMICH_VERSION=release
@@ -367,7 +366,7 @@ REDIS_HOSTNAME=localhost
 
 MACHINE_LEARNING_CACHE_FOLDER=${INSTALL_DIR}/cache
 EOF
-cat <<EOF >"${ML_DIR}"/start.sh
+cat <<EOF >"${ML_DIR}"/ml_start.sh
 #!/usr/bin/env bash
 
 cd ${ML_DIR}
@@ -375,6 +374,7 @@ cd ${ML_DIR}
 
 python -m immich_ml
 EOF
+chmod +x "$ML_DIR"/ml_start.sh
 cat <<EOF >/etc/systemd/system/"${APPLICATION}"-web.service
 [Unit]
 Description=${APPLICATION} Web Service
@@ -409,7 +409,7 @@ User=immich
 Group=immich
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${INSTALL_DIR}/.env
-ExecStart=${ML_DIR}/start.sh
+ExecStart=${ML_DIR}/ml_start.sh
 Restart=on-failure
 SyslogIdentifier=immich-machine-learning
 StandardOutput=append:/var/log/immich/ml.log
@@ -418,6 +418,7 @@ StandardError=append:/var/log/immich/ml.log
 [Install]
 WantedBy=multi-user.target
 EOF
+chown -R immich:immich "$INSTALL_DIR" /var/log/immich
 systemctl enable -q --now "$APPLICATION"-ml.service "$APPLICATION"-web.service
 msg_ok "Created user, env file, scripts and services"
 
