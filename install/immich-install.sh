@@ -274,7 +274,7 @@ ML_DIR="${APP_DIR}/machine-learning"
 GEO_DIR="${INSTALL_DIR}/geodata"
 mkdir -p "$INSTALL_DIR"
 mv "$APPLICATION-$RELEASE"/ "$SRC_DIR"
-mkdir -p {${APP_DIR},${UPLOAD_DIR},${GEO_DIR},${ML_DIR},${INSTALL_DIR}/cache}
+mkdir -p {"${APP_DIR}","${UPLOAD_DIR}","${GEO_DIR}","${ML_DIR}","${INSTALL_DIR}"/cache}
 
 cd "$SRC_DIR"/server || exit
 $STD npm ci
@@ -301,6 +301,7 @@ if [[ "$intel_hw" = 1 ]]; then
     . "$ML_DIR"/ml-venv/bin/activate
     $STD pip3 install uv
     $STD uv sync --extra openvino --active
+    # $STD uv sync --frozen --extra openvino --no-dev --no-editable --no-install-project --compile-bytecode --no-progress --active --link-mode copy
   )
   msg_ok "Installed HW-accelerated machine-learning"
 else
@@ -310,6 +311,7 @@ else
     . "$ML_DIR"/ml-venv/bin/activate
     $STD pip3 install uv
     $STD uv sync --extra cpu --active
+    # $STD uv sync --frozen --extra cpu --no-dev --no-editable --no-install-project --compile-bytecode --no-progress --active --link-mode copy
   )
 fi
 cd "$SRC_DIR" || exit
