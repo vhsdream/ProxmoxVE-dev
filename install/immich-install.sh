@@ -111,8 +111,9 @@ if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
 fi
 
 msg_info "Setting up Postgresql Database"
-$STD apt-get install -y postgresql-common
-echo "YES" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh &>/dev/null
+curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+echo "deb https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" >/etc/apt/sources.list.d/pgdg.list
+$STD apt-get update
 $STD apt-get install -y postgresql-17 postgresql-17-pgvector
 DB_NAME="immich"
 DB_USER="immich"
