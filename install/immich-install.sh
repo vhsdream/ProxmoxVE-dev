@@ -31,6 +31,7 @@ $STD apt-get install --no-install-recommends -y \
   python3-venv \
   python3-dev \
   cmake \
+  jq \
   libbrotli-dev \
   libde265-dev \
   libexif-dev \
@@ -88,7 +89,6 @@ read -r -p "Install OpenVINO dependencies for Intel HW-accelerated machine-learn
 if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
   msg_info "Installing OpenVINO dependencies"
   export intel_hw=1
-  $STD apt-get -y install --no-install-recommends ocl-icd-libopencl1
   tmp_dir=$(mktemp -d)
   $STD pushd "$tmp_dir"
   curl -fsSLO https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-core_1.0.17384.11_amd64.deb
