@@ -33,11 +33,7 @@
   },
   "notes": [
     {
-      "text": "Change the machine-learning URL to `http://localhost:3003` after installation",
-      "type": "info"
-    },
-    {
-      "text": "GPU acceleration is not enabled for this installation",
+      "text": "During install, there is an option for Intel OpenVINO HW-accelerated machine-learning. This also enables HW-accelerated transcoding, but that must be enabled in Video Transcoding Settings",
       "type": "info"
     }
   ]
