@@ -91,10 +91,10 @@ if [[ ${prompt,,} =~ ^(y|yes)$ ]]; then
   $STD apt-get -y install --no-install-recommends ocl-icd-libopencl1
   tmp_dir=$(mktemp -d)
   $STD pushd "$tmp_dir"
-  curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-core_1.0.17384.11_amd64.deb -O
-  curl -fsSL https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-opencl_1.0.17384.11_amd64.deb -O
-  curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/intel-opencl-icd_24.31.30508.7_amd64.deb -O
-  curl -fsSL https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/libigdgmm12_22.4.1_amd64.deb -O
+  curl -fsSLO https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-core_1.0.17384.11_amd64.deb
+  curl -fsSLO https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17384.11/intel-igc-opencl_1.0.17384.11_amd64.deb
+  curl -fsSLO https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/intel-opencl-icd_24.31.30508.7_amd64.deb
+  curl -fsSLO https://github.com/intel/compute-runtime/releases/download/24.31.30508.7/libigdgmm12_22.4.1_amd64.deb
   $STD dpkg -i ./*.deb
   $STD popd
   rm -rf "$tmp_dir"
@@ -113,9 +113,11 @@ curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o
 echo "deb https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" >/etc/apt/sources.list.d/pgdg.list
 $STD apt-get update
 $STD apt-get install -y postgresql-17
-curl -fsSLO https://github.com/tensorchord/pgvecto.rs/releases/download/v0.4.0/vectors-pg17_0.4.0_amd64.deb
-$STD dpkg -i vectors-pg17_0.4.0_amd64.deb
-rm vectors-pg17_0.4.0.amd64.deb
+PSQL_RELEASE=$(curl -fsSL https://api.github.com/repos/tensorchord/pgvecto.rs/releases/latest | grep "tag_name" | awk '{print substr($2, 3, length($2)-4) }')
+curl -fsSLO "https://github.com/tensorchord/pgvecto.rs/releases/latest/download/vectors-pg17_${PSQL_RELEASE}_amd64.deb"
+$STD dpkg -i vectors-pg17_"$PSQL_RELEASE"_amd64.deb
+rm vectors-pg17_"$PSQL_RELEASE"_amd64.deb
+echo "$PSQL_RELEASE" >~/.pgvectors_version.txt
 DB_NAME="immich"
 DB_USER="immich"
 DB_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c18)
@@ -124,7 +126,7 @@ $STD sudo -u postgres psql -c "CREATE DATABASE $DB_NAME WITH OWNER $DB_USER ENCO
 $STD sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME to $DB_USER;"
 $STD sudo -u postgres psql -c "ALTER USER $DB_USER WITH SUPERUSER;"
 $STD sudo -u postgres psql -c "ALTER SYSTEM SET shared_preload_libraries = 'vectors.so';"
-$STD sudo -u postgres psql -c "ALTER SYSTEM SET search_path TO "$user", public, vectors;"
+$STD sudo -u postgres psql -c "ALTER SYSTEM SET search_path TO "$\\user", public, vectors;"
 systemctl restart postgresql.service
 $STD sudo -u postgres psql -c "DROP EXTENSION IF EXISTS vectors;"
 $STD sudo -u postgres psql -c "CREATE EXTENSION vectors;"
